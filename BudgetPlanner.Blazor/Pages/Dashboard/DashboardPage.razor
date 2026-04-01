@@ -1,0 +1,74 @@
+@page "/dashboard"
+@attribute [Authorize]
+@inject ReportsApiService ReportsSvc
+@inject BudgetState BudgetState
+@inject IJSRuntime JS
+
+<div class="page-header">
+    <span class="page-title">Dashboard</span>
+    <div class="header-actions">
+        <select class="form-control" style="width:auto;padding:5px 10px;font-size:.85rem"
+                @bind="_year" @bind:after="LoadAsync">
+            @for (var y = DateTime.Today.Year; y >= DateTime.Today.Year - 3; y--)
+            { <option value="@y">@y</option> }
+        </select>
+    </div>
+</div>
+
+<div class="page-content" style="display:flex;flex-direction:column;gap:20px">
+    @if (_loading)
+    {
+        <div style="text-align:center;padding:60px"><div class="spinner"></div></div>
+    }
+    else
+    {
+        <div class="card-grid">
+            <div class="kpi-card"><div class="kpi-label">Totala inkomster @_year</div><div class="kpi-value income">@_totalIncome.ToString("N0") kr</div></div>
+            <div class="kpi-card"><div class="kpi-label">Totala utgifter @_year</div><div class="kpi-value expense">@_totalExpense.ToString("N0") kr</div></div>
+            <div class="kpi-card"><div class="kpi-label">Netto @_year</div><div class="kpi-value @(_totalIncome+_totalExpense>=0?"income":"expense")">@((_totalIncome+_totalExpense).ToString("N0")) kr</div></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Månadsutveckling @_year</div>
+            <div id="monthly-chart" style="height:280px"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Utgifter per kategori</div>
+            <div id="category-chart" style="height:260px"></div>
+        </div>
+    }
+</div>
+
+@code {
+    private int _year = DateTime.Today.Year;
+    private bool _loading = true;
+    private decimal _totalIncome, _totalExpense;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var summary = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
+        var breakdown = await ReportsSvc.GetCategoryBreakdownAsync(BudgetState.ActiveBudgetId, new DateTime(_year, 1, 1), new DateTime(_year, 12, 31));
+        _loading = false;
+
+        if (summary != null)
+        {
+            _totalIncome  = summary.Rows.Sum(r => r.Income);
+            _totalExpense = summary.Rows.Sum(r => r.Expenses);
+            var months = summary.Rows.Select(r => $"{r.Year}-{r.Month:D2}").ToArray();
+            var inc    = summary.Rows.Select(r => (double)r.Income).ToArray();
+            var exp    = summary.Rows.Select(r => (double)Math.Abs(r.Expenses)).ToArray();
+            await JS.InvokeVoidAsync("renderBarChart", "monthly-chart", months, inc, exp);
+        }
+
+        if (breakdown != null)
+        {
+            var cats = breakdown.Select(x => x.Category).ToArray();
+            var vals = breakdown.Select(x => (double)x.Total).ToArray();
+            await JS.InvokeVoidAsync("renderDonutChart", "category-chart", cats, vals);
+        }
+    }
+}

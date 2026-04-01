@@ -1,0 +1,217 @@
+@page "/receipts/{BatchId:int}"
+@attribute [Authorize]
+@inject ReceiptApiService ReceiptSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+@inject NavigationManager Nav
+@using BudgetPlanner.Blazor.Components.Shared
+
+<div class="page-header">
+    <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn btn-ghost btn-sm" @onclick='() => Nav.NavigateTo("/receipts")'>
+            <span class="material-icons" style="font-size:.9rem">arrow_back</span>
+        </button>
+        <span class="page-title">@(_batch?.Label ?? "Kvittounderlag")</span>
+        @if (_batch != null)
+        {
+            <span class="badge @SBadge(_batch.Status)" style="font-size:.75rem">@_batch.StatusLabel</span>
+        }
+    </div>
+    <div class="header-actions">
+        @if (_batch != null)
+        {
+            <a class="btn btn-secondary btn-sm"
+               href="@ReceiptSvc.GetPdfUrl(BudgetState.ActiveBudgetId, BatchId)" target="_blank">
+                <span class="material-icons" style="font-size:.9rem">picture_as_pdf</span> Ladda ned PDF
+            </a>
+        }
+    </div>
+</div>
+
+<div class="page-content" style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">
+    @if (_batch == null)
+    {
+        <div style="text-align:center;padding:48px"><div class="spinner"></div></div>
+    }
+    else
+    {
+        <div>
+            <div class="card">
+                <div class="card-title"><span class="material-icons">receipt_long</span> Kvittolinjer</div>
+                <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;font-size:.85rem;color:var(--color-muted)">
+                    <span><strong>Kategori:</strong> @_batch.BatchCategoryName</span>
+                    @if (_batch.ProjectName  != null) { <span><strong>Projekt:</strong> @_batch.ProjectName</span> }
+                    @if (_batch.CreatedByEmail != null) { <span><strong>Skapad av:</strong> @_batch.CreatedByEmail</span> }
+                    @if (_batch.RejectionReason != null) { <span style="color:var(--color-expense)"><strong>Avslagsorsak:</strong> @_batch.RejectionReason</span> }
+                </div>
+
+                <table style="width:100%;border-collapse:collapse" class="quickgrid">
+                    <thead>
+                        <tr>
+                            <th style="width:30px">#</th>
+                            <th style="width:110px">Referenskod</th>
+                            <th style="width:90px">Datum</th>
+                            <th>Leverantör</th>
+                            <th>Beskrivning</th>
+                            <th style="width:55px">Valuta</th>
+                            <th style="text-align:right;width:90px">Belopp</th>
+                            <th style="width:40px">Bilaga</th>
+                            @if (_batch.Status == ReceiptBatchStatus.Draft && BudgetState.CanEdit) { <th style="width:36px"></th> }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var line in _batch.Lines.OrderBy(l => l.SequenceNumber))
+                        {
+                            var l = line;
+                            <tr>
+                                <td style="font-size:.8rem;color:var(--color-muted)">@l.SequenceNumber</td>
+                                <td>
+                                    <span style="font-family:monospace;font-weight:700;font-size:.85rem;color:var(--color-primary);letter-spacing:.5px">
+                                        @l.ReferenceCode
+                                    </span>
+                                </td>
+                                <td style="font-size:.85rem">@l.Date.ToString("yyyy-MM-dd")</td>
+                                <td style="font-size:.85rem">@(l.Vendor ?? "–")</td>
+                                <td style="font-size:.85rem">@(l.Description ?? "–")</td>
+                                <td style="font-size:.8rem;color:var(--color-muted)">@l.Currency</td>
+                                <td style="text-align:right;font-weight:600;font-size:.875rem">@l.Amount.ToString("N2") kr</td>
+                                <td>
+                                    <button class="btn btn-ghost btn-icon btn-sm" disabled style="opacity:.4" title="Kommer i en framtida version">
+                                        <span class="material-icons" style="font-size:.9rem">attach_file</span>
+                                    </button>
+                                </td>
+                                @if (_batch.Status == ReceiptBatchStatus.Draft && BudgetState.CanEdit)
+                                {
+                                    <td>
+                                        <button class="btn btn-ghost btn-icon btn-sm" @onclick="() => DeleteLineAsync(l.Id)">
+                                            <span class="material-icons" style="font-size:.9rem;color:var(--color-expense)">delete</span>
+                                        </button>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                        <tr style="border-top:2px solid var(--color-border);font-weight:600">
+                            <td colspan="6" style="text-align:right;padding:8px 12px;font-size:.875rem">Totalt:</td>
+                            <td style="text-align:right;padding:8px 12px;font-size:.875rem">@_batch.TotalAmount.ToString("N2") kr</td>
+                            <td colspan="@(_batch.Status == ReceiptBatchStatus.Draft && BudgetState.CanEdit ? 2 : 1)"></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                @if (_batch.Status == ReceiptBatchStatus.Draft && BudgetState.CanEdit)
+                {
+                    <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--color-border)">
+                        <div class="card-title" style="margin-bottom:10px;font-size:.9rem">Lägg till kvitto</div>
+                        <div class="form-row" style="margin-bottom:8px">
+                            <div class="form-group">
+                                <label class="form-label">Datum *</label>
+                                <input class="form-control" type="date"
+                                       value="@_newDate.ToString("yyyy-MM-dd")"
+                                       @onchange="e => _newDate = DateTime.Parse(e.Value!.ToString()!)" />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Belopp (SEK) *</label>
+                                <input class="form-control" type="number" step="0.01" @bind="_newAmount" />
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-bottom:10px">
+                            <div class="form-group">
+                                <label class="form-label">Leverantör</label>
+                                <input class="form-control" @bind="_newVendor" placeholder="Butik, restaurang..." />
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Beskrivning</label>
+                                <input class="form-control" @bind="_newDesc" placeholder="Vad avser kvittot?" />
+                            </div>
+                        </div>
+
+                        @* FIX #5: reference code generated inline — no dependency on Core.Services *@
+                        <div style="padding:10px 14px;background:var(--color-bg);border-radius:8px;display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                            <span style="font-size:.8rem;color:var(--color-muted)">Nästa referenskod:</span>
+                            <span style="font-family:monospace;font-size:1.1rem;font-weight:700;color:var(--color-primary);letter-spacing:1px">@_previewCode</span>
+                            <span style="font-size:.75rem;color:var(--color-muted)">— skriv på kvittots baksida</span>
+                        </div>
+
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn-primary btn-sm" @onclick="AddLineAsync" disabled="@_adding">
+                                @if (_adding) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                                <span class="material-icons" style="font-size:.9rem">add</span> Lägg till
+                            </button>
+                            <button class="btn btn-ghost btn-sm" disabled style="opacity:.5" title="Kommer i framtida version">
+                                <span class="material-icons" style="font-size:.9rem">attach_file</span> Bifoga bild (kommer snart)
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div>
+            <StatusActionBar Batch="_batch" OnStatusChanged="OnBatchStatusChanged" />
+        </div>
+    }
+</div>
+
+<ConfirmDialog @ref="_confirm" Title="Ta bort kvittorad" Message="Är du säker?" />
+
+@code {
+    [Parameter] public int BatchId { get; set; }
+
+    private ReceiptBatchDto? _batch;
+    private ConfirmDialog?   _confirm;
+    private DateTime _newDate   = DateTime.Today;
+    private decimal  _newAmount;
+    private string?  _newVendor, _newDesc;
+    private string   _previewCode = "…";
+    private bool _adding;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _batch = await ReceiptSvc.GetByIdAsync(BudgetState.ActiveBudgetId, BatchId);
+        if (_batch != null) _previewCode = BuildPreviewCode(_batch);
+    }
+
+    // FIX #5: Inline implementation — no static Core class reference needed in Blazor
+    private static string BuildPreviewCode(ReceiptBatchDto b)
+    {
+        var next = (b.Lines.Any() ? b.Lines.Max(l => l.SequenceNumber) : 0) + 1;
+        var bw = b.Id > 999 ? "D4" : "D3";
+        var sw = next > 999 ? "D4" : "D3";
+        return $"{DateTime.UtcNow.Year}-{b.Id.ToString(bw)}-{next.ToString(sw)}";
+    }
+
+    private async Task AddLineAsync()
+    {
+        if (_newAmount <= 0) { Toast.Error("Ange ett belopp större än 0."); return; }
+        _adding = true;
+        try
+        {
+            await ReceiptSvc.AddLineAsync(BudgetState.ActiveBudgetId, BatchId,
+                new CreateReceiptLineDto(BudgetState.ActiveBudgetId, _newDate, _newAmount, _newVendor, _newDesc));
+            Toast.Success("Kvittorad tillagd.");
+            _newAmount = 0; _newVendor = null; _newDesc = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _adding = false; }
+    }
+
+    private async Task DeleteLineAsync(int lineId)
+    {
+        if (_confirm == null || !await _confirm.ShowAsync()) return;
+        await ReceiptSvc.DeleteLineAsync(BudgetState.ActiveBudgetId, BatchId, lineId);
+        Toast.Success("Rad borttagen.");
+        await LoadAsync();
+    }
+
+    private async Task OnBatchStatusChanged(ReceiptBatchDto updated)
+    {
+        _batch = updated;
+        Toast.Success($"Status ändrad till: {updated.StatusLabel}");
+        StateHasChanged();
+    }
+
+    private static string SBadge(ReceiptBatchStatus s) => s switch { ReceiptBatchStatus.Draft=>"badge-muted", ReceiptBatchStatus.Submitted=>"badge", ReceiptBatchStatus.Approved=>"badge-income", ReceiptBatchStatus.Rejected=>"badge-expense", ReceiptBatchStatus.Reimbursed=>"badge-primary", _=>"badge-muted" };
+}

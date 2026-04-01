@@ -1,0 +1,23 @@
+@if (Summary != null)
+{
+    <div class="card-grid">
+        <div class="kpi-card"><div class="kpi-label">Inkomster</div><div class="kpi-value income">@Summary.FilteredIncome.ToString("N0") kr</div></div>
+        <div class="kpi-card"><div class="kpi-label">Utgifter</div><div class="kpi-value expense">@Summary.FilteredExpenses.ToString("N0") kr</div></div>
+        <div class="kpi-card"><div class="kpi-label">Netto</div><div class="kpi-value @(Summary.FilteredTotal >= 0 ? "income" : "expense")">@Summary.FilteredTotal.ToString("N0") kr</div></div>
+        <div class="kpi-card"><div class="kpi-label">Prognos inkomst</div><div class="kpi-value income">@Summary.MonthlyIncome.ToString("N0") kr</div></div>
+        <div class="kpi-card"><div class="kpi-label">Prognos utgift</div><div class="kpi-value expense">@Summary.MonthlyExpenses.ToString("N0") kr</div></div>
+        <div class="kpi-card"><div class="kpi-label">Prognos netto</div><div class="kpi-value @(Summary.MonthlyTotal >= 0 ? "income" : "expense")">@Summary.MonthlyTotal.ToString("N0") kr</div></div>
+    </div>
+}
+else
+{
+    <div class="card-grid">
+        @for (var i = 0; i < 6; i++) {
+            <div class="kpi-card">
+                <div class="skeleton" style="height:11px;width:55%;margin-bottom:8px;border-radius:4px"></div>
+                <div class="skeleton" style="height:26px;width:75%;border-radius:4px"></div>
+            </div>
+        }
+    </div>
+}
+@code { [Parameter] public SummaryDto? Summary { get; set; } }

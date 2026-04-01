@@ -1,0 +1,155 @@
+@inject JournalFilterState Filter
+@inject BudgetService BudgetSvc
+@inject ProjectService ProjectSvc
+@inject BudgetState BudgetState
+
+<div class="filter-panel">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <span style="font-weight:500;font-size:.9rem;color:var(--color-dark)">
+            Filter @(Filter.HasActiveFilters ? "●" : "")
+        </span>
+        <button class="btn btn-ghost btn-sm" @onclick="Filter.ResetFilters">Rensa</button>
+    </div>
+
+    <div style="margin-bottom:12px">
+        <div style="font-size:.72rem;font-weight:600;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Posttyp</div>
+        @foreach (var t in Enum.GetValues<JournalEntryType>())
+        {
+            var type = t;
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer;font-size:.85rem">
+                <input type="checkbox" checked="@Filter.IsTypeIncluded(type)" @onchange="() => Filter.ToggleType(type)" />
+                @TypeLabel(type)
+            </label>
+        }
+    </div>
+
+    <hr style="border:none;border-top:1px solid var(--color-border);margin-bottom:12px" />
+
+    <div class="filter-row">
+        <input type="checkbox" @bind="Filter.Query.FilterByStartDate" @bind:after="Notify" />
+        <label>Från</label>
+        <input type="date" class="form-control" disabled="@(!Filter.Query.FilterByStartDate)"
+               value="@Filter.Query.StartDate?.ToString("yyyy-MM-dd")"
+               @onchange="e => SetDate(e, d => Filter.Query.StartDate = d)" />
+    </div>
+
+    <div class="filter-row">
+        <input type="checkbox" @bind="Filter.Query.FilterByEndDate" @bind:after="Notify" />
+        <label>Till</label>
+        <input type="date" class="form-control" disabled="@(!Filter.Query.FilterByEndDate)"
+               value="@Filter.Query.EndDate?.ToString("yyyy-MM-dd")"
+               @onchange="e => SetDate(e, d => Filter.Query.EndDate = d)" />
+    </div>
+
+    <div class="filter-row">
+        <input type="checkbox" @bind="Filter.Query.FilterByDescription" @bind:after="Notify" />
+        <label>Text</label>
+        <input class="form-control" @bind="Filter.Query.Description" @bind:after="Notify"
+               placeholder="Fritext..." disabled="@(!Filter.Query.FilterByDescription)" />
+    </div>
+
+    <div class="filter-row">
+        <input type="checkbox" @bind="Filter.Query.FilterByCategory" @bind:after="Notify" />
+        <label>Kategori</label>
+        <select class="form-control" @bind="Filter.Query.CategoryId" @bind:after="Notify"
+                disabled="@(!Filter.Query.FilterByCategory)">
+            <option value="">-- Alla --</option>
+            @foreach (var c in _categories)
+            {
+                <option value="@c.Id">@c.Name</option>
+            }
+        </select>
+    </div>
+
+    <div class="filter-row">
+        <input type="checkbox" @bind="Filter.Query.FilterByProject" @bind:after="Notify" />
+        <label>Projekt</label>
+        <select class="form-control" @bind="Filter.Query.ProjectId" @bind:after="Notify"
+                disabled="@(!Filter.Query.FilterByProject)">
+            <option value="">-- Alla --</option>
+            @foreach (var p in _projects)
+            {
+                <option value="@p.Id">@p.Name</option>
+            }
+        </select>
+    </div>
+
+    @if (Filter.IsTypeIncluded(JournalEntryType.ReceiptBatch))
+    {
+        <hr style="border:none;border-top:1px solid var(--color-border);margin:10px 0" />
+        <div style="font-size:.72rem;font-weight:600;color:var(--color-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Kvittostatus</div>
+        @foreach (var s in Enum.GetValues<ReceiptBatchStatus>())
+        {
+            var status = s;
+            var inc = !Filter.Query.ReceiptStatuses.Any() || Filter.Query.ReceiptStatuses.Contains(status);
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:4px;cursor:pointer;font-size:.85rem">
+                <input type="checkbox" checked="@inc" @onchange="() => ToggleReceiptStatus(status)" />
+                @SwedishStatus(status)
+            </label>
+        }
+    }
+
+    <div style="margin-top:14px">
+        <button class="btn btn-primary btn-sm" style="width:100%;justify-content:center" @onclick="Notify">
+            Tillämpa
+        </button>
+    </div>
+</div>
+
+@code {
+    private List<Category> _categories = new();
+    private List<ProjectDto> _projects = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var cats = await BudgetSvc.GetCategoriesAsync(BudgetState.ActiveBudgetId);
+        _categories = cats ?? new();
+        var projs = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId);
+        _projects = projs ?? new();
+    }
+
+    private void Notify() => Filter.Update(_ => { });
+
+    private void SetDate(Microsoft.AspNetCore.Components.ChangeEventArgs e, Action<DateTime?> setter)
+    {
+        setter(DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null);
+        Notify();
+    }
+
+    private void ToggleReceiptStatus(ReceiptBatchStatus s)
+    {
+        if (!Filter.Query.ReceiptStatuses.Any())
+            Filter.Query.ReceiptStatuses = Enum.GetValues<ReceiptBatchStatus>().Where(x => x != s).ToList();
+        else if (Filter.Query.ReceiptStatuses.Contains(s))
+        {
+            Filter.Query.ReceiptStatuses.Remove(s);
+            if (!Filter.Query.ReceiptStatuses.Any()) Filter.Query.ReceiptStatuses = new();
+        }
+        else
+        {
+            Filter.Query.ReceiptStatuses.Add(s);
+            if (Filter.Query.ReceiptStatuses.Count == Enum.GetValues<ReceiptBatchStatus>().Length)
+                Filter.Query.ReceiptStatuses = new();
+        }
+        Notify();
+    }
+
+    private static string TypeLabel(JournalEntryType t) => t switch
+    {
+        JournalEntryType.Transaction   => "Transaktioner",
+        JournalEntryType.Milersattning => "Milersättning",
+        JournalEntryType.Vab           => "VAB-perioder",
+        JournalEntryType.ReceiptBatch  => "Kvittounderlag",
+        _ => t.ToString()
+    };
+
+    private static string SwedishStatus(ReceiptBatchStatus s) => s switch
+    {
+        ReceiptBatchStatus.Draft      => "Utkast",
+        ReceiptBatchStatus.Submitted  => "Inskickad",
+        ReceiptBatchStatus.Approved   => "Godkänd",
+        ReceiptBatchStatus.Rejected   => "Avslagen",
+        ReceiptBatchStatus.Reimbursed => "Utbetald",
+        _ => s.ToString()
+    };
+}

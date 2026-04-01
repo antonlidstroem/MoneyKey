@@ -1,0 +1,63 @@
+@page "/register"
+@layout EmptyLayout
+@inject AuthService AuthSvc
+@inject NavigationManager Nav
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--color-bg)">
+    <div style="width:100%;max-width:380px;padding:24px">
+        <div style="text-align:center;margin-bottom:32px">
+            <h1 style="font-size:1.8rem;font-weight:700;color:var(--color-primary)">BudgetPlanner</h1>
+            <p style="color:var(--color-muted);font-size:.9rem;margin-top:4px">Skapa ett nytt konto</p>
+        </div>
+        <div class="card">
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div style="background:var(--color-expense-bg);color:var(--color-expense);padding:10px 14px;border-radius:8px;font-size:.875rem;margin-bottom:14px">@_error</div>
+            }
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Förnamn</label>
+                    <input class="form-control" @bind="_firstName" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Efternamn</label>
+                    <input class="form-control" @bind="_lastName" />
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">E-postadress</label>
+                <input class="form-control" type="email" @bind="_email" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Lösenord (minst 8 tecken)</label>
+                <input class="form-control" type="password" @bind="_password" />
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;margin-top:8px"
+                    @onclick="RegisterAsync" disabled="@_loading">
+                @if (_loading) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                Skapa konto
+            </button>
+        </div>
+        <p style="text-align:center;margin-top:16px;font-size:.875rem;color:var(--color-muted)">
+            Har du redan ett konto? <a href="/login" style="color:var(--color-primary)">Logga in</a>
+        </p>
+    </div>
+</div>
+
+@code {
+    private string _firstName = "", _lastName = "", _email = "", _password = "", _error = "";
+    private bool _loading;
+
+    private async Task RegisterAsync()
+    {
+        _error = ""; _loading = true;
+        try
+        {
+            var result = await AuthSvc.RegisterAsync(new RegisterDto(_email, _password, _firstName, _lastName));
+            if (result != null) Nav.NavigateTo("/");
+            else _error = "Registreringen misslyckades.";
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+}

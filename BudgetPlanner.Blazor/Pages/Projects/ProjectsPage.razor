@@ -1,0 +1,84 @@
+@* ── PROJECTS ────────────────────────────────────────────────────────────────── *@
+@page "/projects"
+@attribute [Authorize]
+@inject ProjectService ProjectSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+@inject NavigationManager Nav
+
+<div class="page-header">
+    <span class="page-title">Projekt</span>
+    <div class="header-actions">
+        @if (BudgetState.CanEdit)
+        {
+            <button class="btn btn-primary btn-sm" @onclick="() => _showCreate = true">
+                <span class="material-icons" style="font-size:.9rem">add</span> Nytt projekt
+            </button>
+        }
+    </div>
+</div>
+<div class="page-content">
+    @if (_loading) { <div style="text-align:center;padding:40px"><div class="spinner"></div></div> }
+    else
+    {
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+            @foreach (var p in _projects)
+            {
+                <div class="card">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                        <span style="font-weight:500;font-size:.95rem">@p.Name</span>
+                        <span class="badge @(p.IsActive?"badge-income":"badge-muted")" style="font-size:.72rem">@(p.IsActive?"Aktiv":"Inaktiv")</span>
+                    </div>
+                    @if (p.Description != null) { <p style="font-size:.85rem;color:var(--color-muted);margin-bottom:8px">@p.Description</p> }
+                    <div style="background:var(--color-bg);border-radius:6px;height:6px;margin-bottom:8px;overflow:hidden">
+                        <div style="height:100%;width:@(Math.Min(100,p.ProgressPercent))%;background:@(p.ProgressPercent>90?"var(--color-expense)":"var(--color-income)");transition:width .3s"></div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;font-size:.8rem;color:var(--color-muted)">
+                        <span>Spenderat: @p.SpentAmount.ToString("N0") kr</span>
+                        <span>Budget: @p.BudgetAmount.ToString("N0") kr</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@if (_showCreate)
+{
+    <div class="modal-overlay" @onclick="() => _showCreate = false">
+        <div class="modal" @onclick:stopPropagation>
+            <div class="modal-header"><span class="modal-title">Nytt projekt</span></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">Namn *</label><input class="form-control" @bind="_newName" /></div>
+                <div class="form-group"><label class="form-label">Budget (kr)</label><input class="form-control" type="number" @bind="_newBudget" /></div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Startdatum</label><input class="form-control" type="date" value="@_newStart.ToString("yyyy-MM-dd")" @onchange="e => _newStart = DateTime.Parse(e.Value!.ToString()!)" /></div>
+                    <div class="form-group"><label class="form-label">Slutdatum</label><input class="form-control" type="date" /></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="() => _showCreate = false">Avbryt</button>
+                <button class="btn btn-primary" @onclick="CreateAsync">Skapa</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<ProjectDto> _projects = new();
+    private bool _loading = true, _showCreate;
+    private string _newName = "";
+    private decimal _newBudget;
+    private DateTime _newStart = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() { var r = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId); _projects = r ?? new(); _loading = false; }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        await ProjectSvc.CreateAsync(BudgetState.ActiveBudgetId, new CreateProjectDto(_newName, null, _newBudget, _newStart, null));
+        Toast.Success("Projekt skapat.");
+        _showCreate = false; _newName = "";
+        var r = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId); _projects = r ?? new();
+    }
+}

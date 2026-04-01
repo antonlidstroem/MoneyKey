@@ -1,0 +1,102 @@
+@inherits LayoutComponentBase
+@inject BudgetState BudgetState
+@inject AuthService AuthSvc
+@inject BudgetService BudgetSvc
+@inject SignalRService SignalR
+@inject NavigationManager Nav
+@inject IConfiguration Config
+@using BudgetPlanner.Blazor.Components.Shared
+
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-logo"><h1>Budget<span>Planner</span></h1></div>
+
+        <div class="budget-switcher">
+            <select @onchange="OnBudgetChanged" value="@BudgetState.ActiveBudgetId">
+                @foreach (var b in BudgetState.MyBudgets)
+                {
+                    <option value="@b.Id">@b.Name</option>
+                }
+            </select>
+        </div>
+
+        <nav class="nav-section">
+            <div class="nav-label">Navigering</div>
+            <NavLink class="nav-item" href="/" Match="NavLinkMatch.All">
+                <span class="material-icons">list_alt</span> Journal
+            </NavLink>
+            <NavLink class="nav-item" href="/projects">
+                <span class="material-icons">folder</span> Projekt
+            </NavLink>
+            <NavLink class="nav-item" href="/milersattning">
+                <span class="material-icons">directions_car</span> Milersättning
+            </NavLink>
+            <NavLink class="nav-item" href="/vab">
+                <span class="material-icons">child_care</span> VAB
+            </NavLink>
+            <NavLink class="nav-item" href="/receipts">
+                <span class="material-icons">receipt_long</span> Kvittounderlag
+            </NavLink>
+        </nav>
+
+        <nav class="nav-section">
+            <div class="nav-label">Rapporter</div>
+            <NavLink class="nav-item" href="/dashboard">
+                <span class="material-icons">dashboard</span> Dashboard
+            </NavLink>
+            <NavLink class="nav-item" href="/reports">
+                <span class="material-icons">bar_chart</span> Export &amp; Import
+            </NavLink>
+            @if (BudgetState.IsOwner)
+            {
+                <NavLink class="nav-item" href="/settings">
+                    <span class="material-icons">settings</span> Inställningar
+                </NavLink>
+            }
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-chip">
+                <div class="user-avatar">@Initials</div>
+                <div>
+                    <div class="user-name">@(AuthSvc.CurrentUser?.Email ?? "")</div>
+                    <button class="btn btn-ghost btn-sm" @onclick="LogoutAsync">Logga ut</button>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <div class="main-area">@Body</div>
+</div>
+
+<ToastContainer />
+
+@code {
+    private string Initials => AuthSvc.CurrentUser is { } u
+        ? $"{u.FirstName.FirstOrDefault()}{u.LastName.FirstOrDefault()}".ToUpper() : "?";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var budgets = await BudgetSvc.GetMyBudgetsAsync();
+        if (budgets != null) BudgetState.SetBudgets(budgets);
+
+        if (!string.IsNullOrEmpty(Services.JwtAuthenticationStateProvider.AccessToken))
+        {
+            var apiBase = Config["ApiBaseUrl"] ?? "https://localhost:7000";
+            await SignalR.ConnectAsync(apiBase,
+                Services.JwtAuthenticationStateProvider.AccessToken!,
+                BudgetState.ActiveBudgetId);
+        }
+    }
+
+    private async Task OnBudgetChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id))
+        {
+            var b = BudgetState.MyBudgets.FirstOrDefault(x => x.Id == id);
+            if (b != null) { BudgetState.SetActiveBudget(b); await SignalR.SwitchBudgetAsync(id); Nav.NavigateTo("/"); }
+        }
+    }
+
+    private async Task LogoutAsync() { await AuthSvc.LogoutAsync(); Nav.NavigateTo("/login"); }
+}

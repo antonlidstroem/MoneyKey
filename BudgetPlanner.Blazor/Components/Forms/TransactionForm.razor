@@ -1,0 +1,203 @@
+@inject TransactionService TxSvc
+@inject BudgetState BudgetState
+@using BudgetPlanner.Blazor.Components.Forms
+
+<div class="card">
+    <div class="card-title">@(_dto.Id == 0 ? "Ny post" : "Redigera post")</div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div style="color:var(--color-expense);font-size:.85rem;margin-bottom:8px">@_error</div>
+    }
+
+    <div class="form-group">
+        <label class="form-label">Typ</label>
+        <select class="form-control" @bind="_dto.Type" @bind:after="OnTypeChanged">
+            <option value="@TransactionType.Income">Inkomst</option>
+            <option value="@TransactionType.Expense">Utgift</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label class="form-label">Kategori *</label>
+        <select class="form-control" @bind="_dto.CategoryId" @bind:after="OnCategoryChanged">
+            <option value="0">-- Välj kategori --</option>
+            @foreach (var cat in _categories.Where(c => c.Type == _dto.Type))
+            {
+                <option value="@cat.Id">@cat.Name</option>
+            }
+        </select>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Startdatum *</label>
+            <input class="form-control" type="date"
+                   value="@_dto.StartDate.ToString("yyyy-MM-dd")"
+                   @onchange="e => _dto.StartDate = DateTime.Parse(e.Value!.ToString()!)" />
+        </div>
+        @if (_showEndDate)
+        {
+            <div class="form-group">
+                <label class="form-label">Slutdatum</label>
+                <input class="form-control" type="date"
+                       value="@_dto.EndDate?.ToString("yyyy-MM-dd")"
+                       @onchange="e => _dto.EndDate = e.Value?.ToString() is { Length: > 0 } s ? DateTime.Parse(s) : null" />
+            </div>
+        }
+    </div>
+
+    @if (_showGrossNet)
+    {
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Brutto (kr)</label>
+                <input class="form-control" type="number" step="0.01" @bind="_dto.GrossAmount" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Netto (kr) *</label>
+                <input class="form-control" type="number" step="0.01" @bind="_dto.NetAmount" />
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="form-group">
+            <label class="form-label">Belopp (kr) *</label>
+            <input class="form-control" type="number" step="0.01" @bind="_dto.NetAmount" />
+        </div>
+    }
+
+    <div class="form-group">
+        <label class="form-label">Beskrivning</label>
+        <input class="form-control" @bind="_dto.Description" placeholder="Valfri beskrivning..." />
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label class="form-label">Återkommande</label>
+            <select class="form-control" @bind="_dto.Recurrence">
+                <option value="@Recurrence.OneTime">Engång</option>
+                <option value="@Recurrence.Monthly">Månadsvis</option>
+                <option value="@Recurrence.Yearly">Årsvis</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Projekt</label>
+            <select class="form-control" @bind="_dto.ProjectId">
+                <option value="">-- Inget --</option>
+                @foreach (var p in Projects)
+                {
+                    <option value="@p.Id">@p.Name</option>
+                }
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.875rem">
+            <input type="checkbox" @bind="_showKontering" />
+            Lägg till kontering
+        </label>
+    </div>
+
+    @if (_showKontering)
+    {
+        <KonteringTable Rows="_dto.KonteringRows"
+                        ParentAmount="_dto.NetAmount"
+                        RowsChanged="rows => _dto.KonteringRows = rows" />
+    }
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+            @if (_saving) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+            Spara
+        </button>
+        <button class="btn btn-secondary" @onclick="() => OnCancelled.InvokeAsync()">Avbryt</button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public TransactionDto?                       EditTransaction { get; set; }
+    [Parameter] public List<ProjectDto>                      Projects        { get; set; } = new();
+    [Parameter] public EventCallback<TransactionDto>         OnSaved         { get; set; }
+    [Parameter] public EventCallback                         OnCancelled     { get; set; }
+
+    private CreateTransactionDto _dto = new() { StartDate = DateTime.Today, Type = TransactionType.Expense, Recurrence = Recurrence.OneTime };
+    // FIX #6: _categories is already List<Category>; no Cast<>() needed
+    private List<Category> _categories = new();
+    private bool _saving, _showKontering, _showEndDate, _showGrossNet;
+    private string _error = "";
+
+    [Inject] private BudgetService BudgetSvc { get; set; } = null!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var cats = await BudgetSvc.GetCategoriesAsync(BudgetState.ActiveBudgetId);
+        _categories = cats ?? new List<Category>();
+
+        if (EditTransaction != null)
+        {
+            _dto = new CreateTransactionDto
+            {
+                StartDate     = EditTransaction.StartDate,
+                EndDate       = EditTransaction.EndDate,
+                NetAmount     = Math.Abs(EditTransaction.NetAmount),
+                GrossAmount   = EditTransaction.GrossAmount,
+                Description   = EditTransaction.Description,
+                CategoryId    = EditTransaction.CategoryId,
+                Type          = EditTransaction.Type,
+                Recurrence    = EditTransaction.Recurrence,
+                IsActive      = EditTransaction.IsActive,
+                Month         = EditTransaction.Month,
+                Rate          = EditTransaction.Rate,
+                ProjectId     = EditTransaction.ProjectId,
+                KonteringRows = EditTransaction.KonteringRows
+            };
+            if (EditTransaction is { Id: > 0 })
+                _dto = new UpdateTransactionDto
+                {
+                    Id = EditTransaction.Id,
+                    StartDate = _dto.StartDate, EndDate = _dto.EndDate,
+                    NetAmount = _dto.NetAmount, GrossAmount = _dto.GrossAmount,
+                    Description = _dto.Description, CategoryId = _dto.CategoryId,
+                    Type = _dto.Type, Recurrence = _dto.Recurrence, IsActive = _dto.IsActive,
+                    Month = _dto.Month, Rate = _dto.Rate, ProjectId = _dto.ProjectId,
+                    KonteringRows = _dto.KonteringRows
+                };
+            _showKontering = EditTransaction.HasKontering;
+            UpdateFlags();
+        }
+    }
+
+    private void OnTypeChanged()    => UpdateFlags();
+    private void OnCategoryChanged() => UpdateFlags();
+
+    private void UpdateFlags()
+    {
+        var cat = _categories.FirstOrDefault(c => c.Id == _dto.CategoryId);
+        _showEndDate  = cat?.HasEndDate     == true;
+        _showGrossNet = cat?.ToggleGrossNet == true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = "";
+        if (_dto.CategoryId == 0) { _error = "Välj en kategori."; return; }
+        if (_dto.NetAmount  == 0) { _error = "Ange ett belopp."; return; }
+
+        _saving = true;
+        try
+        {
+            TransactionDto? result;
+            if (_dto is UpdateTransactionDto upd)
+                result = await TxSvc.UpdateAsync(BudgetState.ActiveBudgetId, upd);
+            else
+                result = await TxSvc.CreateAsync(BudgetState.ActiveBudgetId, _dto);
+
+            if (result != null) await OnSaved.InvokeAsync(result);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _saving = false; }
+    }
+}

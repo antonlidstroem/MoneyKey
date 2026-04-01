@@ -1,0 +1,76 @@
+@page "/vab"
+@attribute [Authorize]
+@inject VabApiService VabSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+
+<div class="page-header"><span class="page-title">VAB-perioder</span>
+    @if (BudgetState.CanEdit) { <div class="header-actions"><button class="btn btn-primary btn-sm" @onclick="() => _showForm = true"><span class="material-icons" style="font-size:.9rem">add</span> Ny VAB</button></div> }
+</div>
+<div class="page-content">
+    @if (_loading) { <div style="text-align:center;padding:40px"><div class="spinner"></div></div> }
+    else
+    {
+        <div class="grid-container">
+            <table style="width:100%;border-collapse:collapse" class="quickgrid">
+                <thead><tr><th>Barn</th><th>Från</th><th>Till</th><th style="text-align:right">Dagar</th><th style="text-align:right">Dagersättning</th><th style="text-align:right">Nivå</th><th style="text-align:right">Totalt</th><th style="width:40px"></th></tr></thead>
+                <tbody>
+                    @if (!_items.Any()) { <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--color-muted)">Inga VAB-perioder registrerade.</td></tr> }
+                    @foreach (var v in _items)
+                    {
+                        var item = v;
+                        <tr>
+                            <td style="font-size:.85rem">@(v.ChildName ?? "–")</td>
+                            <td style="font-size:.85rem">@v.StartDate.ToString("yyyy-MM-dd")</td>
+                            <td style="font-size:.85rem">@v.EndDate.ToString("yyyy-MM-dd")</td>
+                            <td style="text-align:right;font-size:.85rem">@v.TotalDays</td>
+                            <td style="text-align:right;font-size:.85rem">@v.DailyBenefit.ToString("N0") kr</td>
+                            <td style="text-align:right;font-size:.85rem">@((v.Rate*100).ToString("N0"))%</td>
+                            <td style="text-align:right;font-weight:600;font-size:.875rem;color:var(--color-expense)">−@v.TotalAmount.ToString("N2") kr</td>
+                            @if (BudgetState.CanEdit)
+                            {
+                                <td><button class="btn btn-ghost btn-icon btn-sm" @onclick="() => DeleteAsync(item.Id)"><span class="material-icons" style="font-size:.9rem;color:var(--color-expense)">delete</span></button></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_showForm)
+{
+    <div class="modal-overlay" @onclick="() => _showForm = false">
+        <div class="modal" @onclick:stopPropagation>
+            <div class="modal-header"><span class="modal-title">Ny VAB-period</span></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">Barnets namn</label><input class="form-control" @bind="_child" placeholder="Valfritt" /></div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Från</label><input class="form-control" type="date" value="@_start.ToString("yyyy-MM-dd")" @onchange="e => _start = DateTime.Parse(e.Value!.ToString()!)" /></div>
+                    <div class="form-group"><label class="form-label">Till</label><input class="form-control" type="date" value="@_end.ToString("yyyy-MM-dd")" @onchange="e => _end = DateTime.Parse(e.Value!.ToString()!)" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Dagersättning (kr)</label><input class="form-control" type="number" @bind="_benefit" /></div>
+                    <div class="form-group"><label class="form-label">Ersättningsnivå (0–1)</label><input class="form-control" type="number" step="0.01" min="0" max="1" @bind="_rate" /></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="() => _showForm = false">Avbryt</button>
+                <button class="btn btn-primary" @onclick="CreateAsync">Spara</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<VabDto> _items = new();
+    private bool _loading = true, _showForm;
+    private string? _child;
+    private DateTime _start = DateTime.Today, _end = DateTime.Today;
+    private decimal _benefit, _rate = 0.8m;
+
+    protected override async Task OnInitializedAsync() { var r = await VabSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new(); _loading = false; }
+    private async Task CreateAsync() { await VabSvc.CreateAsync(BudgetState.ActiveBudgetId, new CreateVabDto(_child, _start, _end, _benefit, _rate)); Toast.Success("VAB sparad."); _showForm = false; var r = await VabSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new(); }
+    private async Task DeleteAsync(int id) { await VabSvc.DeleteAsync(BudgetState.ActiveBudgetId, id); Toast.Success("Borttagen."); var r = await VabSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new(); }
+}

@@ -1,0 +1,87 @@
+@* ── MILERSÄTTNING ───────────────────────────────────────────────────────────── *@
+@page "/milersattning"
+@attribute [Authorize]
+@inject MilersattningApiService MiSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+
+<div class="page-header"><span class="page-title">Milersättning</span>
+    @if (BudgetState.CanEdit) { <div class="header-actions"><button class="btn btn-primary btn-sm" @onclick="() => _showForm = true"><span class="material-icons" style="font-size:.9rem">add</span> Ny resa</button></div> }
+</div>
+<div class="page-content">
+    @if (_loading) { <div style="text-align:center;padding:40px"><div class="spinner"></div></div> }
+    else
+    {
+        <div class="grid-container">
+            <table style="width:100%;border-collapse:collapse" class="quickgrid">
+                <thead><tr><th>Datum</th><th>Från</th><th>Till</th><th style="text-align:right">Km</th><th style="text-align:right">Taxa</th><th style="text-align:right">Ersättning</th><th>Syfte</th><th style="width:40px"></th></tr></thead>
+                <tbody>
+                    @if (!_items.Any()) { <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--color-muted)">Inga resor registrerade.</td></tr> }
+                    @foreach (var m in _items)
+                    {
+                        var item = m;
+                        <tr>
+                            <td style="font-size:.85rem">@m.TripDate.ToString("yyyy-MM-dd")</td>
+                            <td style="font-size:.85rem">@m.FromLocation</td>
+                            <td style="font-size:.85rem">@m.ToLocation</td>
+                            <td style="text-align:right;font-size:.85rem">@m.DistanceKm.ToString("N0")</td>
+                            <td style="text-align:right;font-size:.85rem">@m.RatePerKm.ToString("N2") kr</td>
+                            <td style="text-align:right;font-weight:600;font-size:.875rem;color:var(--color-income)">+@m.ReimbursementAmount.ToString("N2") kr</td>
+                            <td style="font-size:.85rem;color:var(--color-muted)">@(m.Purpose ?? "–")</td>
+                            @if (BudgetState.CanEdit)
+                            {
+                                <td><button class="btn btn-ghost btn-icon btn-sm" @onclick="() => DeleteAsync(item.Id)"><span class="material-icons" style="font-size:.9rem;color:var(--color-expense)">delete</span></button></td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@if (_showForm)
+{
+    <div class="modal-overlay" @onclick="() => _showForm = false">
+        <div class="modal" @onclick:stopPropagation>
+            <div class="modal-header"><span class="modal-title">Ny milersättning</span></div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Datum</label><input class="form-control" type="date" value="@_date.ToString("yyyy-MM-dd")" @onchange="e => _date = DateTime.Parse(e.Value!.ToString()!)" /></div>
+                    <div class="form-group"><label class="form-label">Distans (km)</label><input class="form-control" type="number" step="0.1" @bind="_km" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Från</label><input class="form-control" @bind="_from" /></div>
+                    <div class="form-group"><label class="form-label">Till</label><input class="form-control" @bind="_to" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label class="form-label">Taxa (kr/km)</label><input class="form-control" type="number" step="0.01" @bind="_rate" /></div>
+                    <div class="form-group"><label class="form-label">Syfte</label><input class="form-control" @bind="_purpose" /></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="() => _showForm = false">Avbryt</button>
+                <button class="btn btn-primary" @onclick="CreateAsync">Spara</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<MilersattningDto> _items = new();
+    private bool _loading = true, _showForm;
+    private DateTime _date = DateTime.Today;
+    private decimal _km, _rate = 0.25m;
+    private string _from = "", _to = "", _purpose = "";
+
+    protected override async Task OnInitializedAsync() { var r = await MiSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new(); _loading = false; }
+
+    private async Task CreateAsync()
+    {
+        await MiSvc.CreateAsync(BudgetState.ActiveBudgetId, new CreateMilersattningDto(_date, _from, _to, _km, _rate, _purpose));
+        Toast.Success("Milersättning sparad."); _showForm = false;
+        var r = await MiSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new();
+    }
+
+    private async Task DeleteAsync(int id) { await MiSvc.DeleteAsync(BudgetState.ActiveBudgetId, id); Toast.Success("Borttagen."); var r = await MiSvc.GetAllAsync(BudgetState.ActiveBudgetId); _items = r ?? new(); }
+}

@@ -1,0 +1,26 @@
+@using Microsoft.AspNetCore.Components.Authorization
+
+<CascadingAuthenticationState>
+    <Router AppAssembly="@typeof(App).Assembly">
+        <Found Context="routeData">
+            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(Layout.MainLayout)">
+                <NotAuthorized>
+                    <BudgetPlanner.Blazor.Components.Shared.RedirectToLogin />
+                </NotAuthorized>
+                <Authorizing>
+                    <div class="loading-screen">
+                        <div class="spinner"></div>
+                        <p>Autentiserar...</p>
+                    </div>
+                </Authorizing>
+            </AuthorizeRouteView>
+            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+        </Found>
+        <NotFound>
+            <PageTitle>404 – Sidan hittades inte</PageTitle>
+            <LayoutView Layout="@typeof(Layout.MainLayout)">
+                <h1 style="padding:2rem">404 – Sidan hittades inte</h1>
+            </LayoutView>
+        </NotFound>
+    </Router>
+</CascadingAuthenticationState>

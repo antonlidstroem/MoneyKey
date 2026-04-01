@@ -1,0 +1,145 @@
+@inject ReceiptApiService ReceiptSvc
+@inject BudgetState BudgetState
+@inject Services.JwtAuthenticationStateProvider AuthProvider
+
+<div class="card">
+    <div class="card-title"><span class="material-icons">manage_accounts</span> Åtgärder</div>
+
+    @* Status timeline *@
+    <div style="margin-bottom:14px">
+        @foreach (var s in new[] { ReceiptBatchStatus.Draft, ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Approved, ReceiptBatchStatus.Reimbursed })
+        {
+            var past    = (int)Batch.Status > (int)s;
+            var current = Batch.Status == s;
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+                <div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:@(past||current ? "var(--color-income)" : "var(--color-border)")"></div>
+                <span style="font-size:.85rem;font-weight:@(current?"500":"400");color:@(current?"var(--color-dark)":"var(--color-muted)")">
+                    @SwedishStatus(s) @(current ? " ← nu" : "")
+                </span>
+            </div>
+        }
+        @if (Batch.Status == ReceiptBatchStatus.Rejected)
+        {
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+                <div style="width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--color-expense)"></div>
+                <span style="font-size:.85rem;font-weight:500;color:var(--color-expense)">Avslagen ← nu</span>
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div style="background:var(--color-expense-bg);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:.8rem;color:var(--color-expense)">@_error</div>
+    }
+
+    @if (Batch.Status == ReceiptBatchStatus.Rejected && Batch.RejectionReason != null)
+    {
+        <div style="background:var(--color-expense-bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:.85rem">
+            <strong style="color:var(--color-expense)">Avslagsorsak:</strong>
+            <p style="margin-top:4px">@Batch.RejectionReason</p>
+        </div>
+    }
+
+    <div style="display:flex;flex-direction:column;gap:8px">
+        @if (Batch.Status == ReceiptBatchStatus.Draft && IsCreator && BudgetState.CanEdit)
+        {
+            <button class="btn btn-primary" @onclick="() => ChangeStatus(ReceiptBatchStatus.Submitted)"
+                    disabled="@(!Batch.Lines.Any() || _busy)">
+                @if (_busy) { <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:4px"></span> }
+                <span class="material-icons" style="font-size:.9rem">send</span> Skicka in
+            </button>
+            @if (!Batch.Lines.Any())
+            {
+                <p style="font-size:.75rem;color:var(--color-muted)">Lägg till minst ett kvitto innan du kan skicka in.</p>
+            }
+        }
+        @if (Batch.Status == ReceiptBatchStatus.Submitted && IsCreator)
+        {
+            <button class="btn btn-secondary" @onclick="() => ChangeStatus(ReceiptBatchStatus.Draft)" disabled="@_busy">
+                <span class="material-icons" style="font-size:.9rem">undo</span> Återkalla
+            </button>
+        }
+        @if (Batch.Status == ReceiptBatchStatus.Rejected && IsCreator)
+        {
+            <button class="btn btn-primary" @onclick="() => ChangeStatus(ReceiptBatchStatus.Draft)" disabled="@_busy">
+                <span class="material-icons" style="font-size:.9rem">edit</span> Redigera &amp; skicka om
+            </button>
+        }
+        @if (Batch.Status == ReceiptBatchStatus.Submitted && BudgetState.IsOwner)
+        {
+            <button class="btn btn-secondary" style="color:var(--color-income)"
+                    @onclick="() => ChangeStatus(ReceiptBatchStatus.Approved)" disabled="@_busy">
+                @if (_busy) { <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:4px"></span> }
+                <span class="material-icons" style="font-size:.9rem">check_circle</span> Godkänn
+            </button>
+            <button class="btn btn-secondary" style="color:var(--color-expense)"
+                    @onclick="() => _showReject = true" disabled="@_busy">
+                <span class="material-icons" style="font-size:.9rem">cancel</span> Avslå
+            </button>
+        }
+        @if (Batch.Status == ReceiptBatchStatus.Approved && BudgetState.IsOwner)
+        {
+            <button class="btn btn-primary" @onclick="() => ChangeStatus(ReceiptBatchStatus.Reimbursed)" disabled="@_busy">
+                @if (_busy) { <span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;margin-right:4px"></span> }
+                <span class="material-icons" style="font-size:.9rem">payments</span> Markera utbetald
+            </button>
+        }
+    </div>
+</div>
+
+@if (_showReject)
+{
+    <div class="modal-overlay" @onclick="() => _showReject = false">
+        <div class="modal" style="max-width:440px" @onclick:stopPropagation>
+            <div class="modal-header"><span class="modal-title">Avslå underlag</span></div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">Orsak</label>
+                    <textarea class="form-control" rows="3" @bind="_rejectReason" placeholder="Beskriv varför underlaget avsläs..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="() => _showReject = false">Avbryt</button>
+                <button class="btn btn-danger" @onclick="RejectAsync">Avslå</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public ReceiptBatchDto Batch { get; set; } = null!;
+    [Parameter] public EventCallback<ReceiptBatchDto> OnStatusChanged { get; set; }
+
+    private string _error = "", _rejectReason = "";
+    private bool _busy, _showReject;
+
+    // FIX #14: use AuthProvider inject instead of static class
+    private bool IsCreator => Batch.CreatedByUserId ==
+        Services.JwtAuthenticationStateProvider.CurrentUser?.Id;
+
+    private async Task ChangeStatus(ReceiptBatchStatus s, string? reason = null)
+    {
+        _busy = true; _error = "";
+        try
+        {
+            var updated = await ReceiptSvc.UpdateStatusAsync(BudgetState.ActiveBudgetId, Batch.Id, s, reason);
+            if (updated != null) await OnStatusChanged.InvokeAsync(updated);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task RejectAsync()
+    {
+        _showReject = false;
+        await ChangeStatus(ReceiptBatchStatus.Rejected, _rejectReason);
+        _rejectReason = "";
+    }
+
+    private static string SwedishStatus(ReceiptBatchStatus s) => s switch
+    {
+        ReceiptBatchStatus.Draft => "Utkast", ReceiptBatchStatus.Submitted => "Inskickad",
+        ReceiptBatchStatus.Approved => "Godkänd", ReceiptBatchStatus.Reimbursed => "Utbetald",
+        _ => s.ToString()
+    };
+}

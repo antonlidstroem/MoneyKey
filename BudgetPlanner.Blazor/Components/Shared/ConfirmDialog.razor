@@ -1,0 +1,35 @@
+@if (_visible)
+{
+    <div class="modal-overlay" @onclick="Cancel">
+        <div class="modal" style="max-width:400px" @onclick:stopPropagation>
+            <div class="modal-header">
+                <span class="modal-title">@Title</span>
+            </div>
+            <div class="modal-body">
+                <p style="color:var(--color-mid);font-size:.9rem">@Message</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" @onclick="Cancel">Avbryt</button>
+                <button class="btn btn-danger"    @onclick="Confirm">@ConfirmLabel</button>
+            </div>
+        </div>
+    </div>
+}
+@code {
+    [Parameter] public string Title        { get; set; } = "Bekräfta";
+    [Parameter] public string Message      { get; set; } = "Är du säker?";
+    [Parameter] public string ConfirmLabel { get; set; } = "Ta bort";
+
+    private bool _visible;
+    private TaskCompletionSource<bool>? _tcs;
+
+    public Task<bool> ShowAsync()
+    {
+        _tcs = new TaskCompletionSource<bool>();
+        _visible = true; StateHasChanged();
+        return _tcs.Task;
+    }
+
+    private void Confirm() { _visible = false; _tcs?.SetResult(true);  StateHasChanged(); }
+    private void Cancel()  { _visible = false; _tcs?.SetResult(false); StateHasChanged(); }
+}
