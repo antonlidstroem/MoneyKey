@@ -12,43 +12,35 @@ using BudgetPlanner.Domain.Enums;
 
 namespace BudgetPlanner.Core.Services;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// BUDGET CALCULATION
-// ═══════════════════════════════════════════════════════════════════════════════
 public class BudgetCalculationService
 {
     public SummaryDto ComputeSummary(List<JournalEntryDto> entries)
     {
-        // Receipt batches in Draft/Submitted are excluded from financials
         var countable = entries.Where(e =>
             e.EntryType != JournalEntryType.ReceiptBatch ||
             e.Status is "Godkänd" or "Utbetald").ToList();
 
-        var income   = countable.Where(e => e.Amount > 0).Sum(e => e.Amount);
+        var income = countable.Where(e => e.Amount > 0).Sum(e => e.Amount);
         var expenses = countable.Where(e => e.Amount < 0).Sum(e => e.Amount);
 
-        // Monthly forecast from transaction entries only
-        var monthlyIncome   = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount > 0).Sum(e => e.Amount);
+        var monthlyIncome = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount > 0).Sum(e => e.Amount);
         var monthlyExpenses = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount < 0).Sum(e => e.Amount);
 
         return new SummaryDto
         {
-            FilteredIncome   = income,
+            FilteredIncome = income,
             FilteredExpenses = expenses,
-            MonthlyIncome    = monthlyIncome,
-            MonthlyExpenses  = monthlyExpenses
+            MonthlyIncome = monthlyIncome,
+            MonthlyExpenses = monthlyExpenses
         };
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MILERSÄTTNING
-// ═══════════════════════════════════════════════════════════════════════════════
 public class MilersattningService
 {
     private readonly IMilersattningRepository _repo;
-    private readonly ITransactionRepository   _txRepo;
-    private readonly IAppSettingRepository    _settings;
+    private readonly ITransactionRepository _txRepo;
+    private readonly IAppSettingRepository _settings;
 
     public MilersattningService(IMilersattningRepository repo, ITransactionRepository txRepo, IAppSettingRepository settings)
     { _repo = repo; _txRepo = txRepo; _settings = settings; }
@@ -58,23 +50,29 @@ public class MilersattningService
         var rate = await GetRateAsync(budgetId);
         var entry = new MilersattningEntry
         {
-            BudgetId     = budgetId, UserId = userId,
-            TripDate     = dto.TripDate,
-            FromLocation = dto.FromLocation, ToLocation = dto.ToLocation,
-            DistanceKm   = dto.DistanceKm,
-            RatePerKm    = dto.RatePerKm > 0 ? dto.RatePerKm : rate,
-            Purpose      = dto.Purpose
+            BudgetId = budgetId,
+            UserId = userId,
+            TripDate = dto.TripDate,
+            FromLocation = dto.FromLocation,
+            ToLocation = dto.ToLocation,
+            DistanceKm = dto.DistanceKm,
+            RatePerKm = dto.RatePerKm > 0 ? dto.RatePerKm : rate,
+            Purpose = dto.Purpose
         };
         entry = await _repo.CreateAsync(entry);
 
         var tx = new Transaction
         {
-            BudgetId           = budgetId, StartDate = dto.TripDate,
-            NetAmount          = entry.ReimbursementAmount,
-            Description        = $"Milersättning: {dto.FromLocation} → {dto.ToLocation} ({dto.DistanceKm} km)",
-            CategoryId         = 12,
-            Type               = TransactionType.Income, Recurrence = Recurrence.OneTime, IsActive = true,
-            CreatedByUserId    = userId, MilersattningEntryId = entry.Id
+            BudgetId = budgetId,
+            StartDate = dto.TripDate,
+            NetAmount = entry.ReimbursementAmount,
+            Description = $"Milersättning: {dto.FromLocation} → {dto.ToLocation} ({dto.DistanceKm} km)",
+            CategoryId = 12,
+            Type = TransactionType.Income,
+            Recurrence = Recurrence.OneTime,
+            IsActive = true,
+            CreatedByUserId = userId,
+            MilersattningEntryId = entry.Id
         };
         tx = await _txRepo.CreateAsync(tx);
         entry.LinkedTransactionId = tx.Id;
@@ -97,12 +95,9 @@ public class MilersattningService
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// VAB
-// ═══════════════════════════════════════════════════════════════════════════════
 public class VabService
 {
-    private readonly IVabRepository         _repo;
+    private readonly IVabRepository _repo;
     private readonly ITransactionRepository _txRepo;
 
     public VabService(IVabRepository repo, ITransactionRepository txRepo)
@@ -112,22 +107,31 @@ public class VabService
     {
         var entry = new VabEntry
         {
-            BudgetId = budgetId, UserId = userId, ChildName = dto.ChildName,
-            StartDate = dto.StartDate, EndDate = dto.EndDate,
-            DailyBenefit = dto.DailyBenefit, Rate = dto.Rate
+            BudgetId = budgetId,
+            UserId = userId,
+            ChildName = dto.ChildName,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            DailyBenefit = dto.DailyBenefit,
+            Rate = dto.Rate
         };
         entry = await _repo.CreateAsync(entry);
 
         var tx = new Transaction
         {
-            BudgetId        = budgetId, StartDate = dto.StartDate, EndDate = dto.EndDate,
-            NetAmount       = -entry.TotalAmount,
-            Description     = string.IsNullOrWhiteSpace(dto.ChildName)
+            BudgetId = budgetId,
+            StartDate = dto.StartDate,
+            EndDate = dto.EndDate,
+            NetAmount = -entry.TotalAmount,
+            Description = string.IsNullOrWhiteSpace(dto.ChildName)
                 ? $"VAB {dto.StartDate:d}–{dto.EndDate:d} ({entry.TotalDays} dagar)"
                 : $"VAB {dto.ChildName}: {dto.StartDate:d}–{dto.EndDate:d} ({entry.TotalDays} dagar)",
-            CategoryId      = 11,
-            Type            = TransactionType.Expense, Recurrence = Recurrence.OneTime, IsActive = true,
-            CreatedByUserId = userId, VabEntryId = entry.Id
+            CategoryId = 11,
+            Type = TransactionType.Expense,
+            Recurrence = Recurrence.OneTime,
+            IsActive = true,
+            CreatedByUserId = userId,
+            VabEntryId = entry.Id
         };
         tx = await _txRepo.CreateAsync(tx);
         entry.LinkedTransactionId = tx.Id;
@@ -144,22 +148,18 @@ public class VabService
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// RECEIPT
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ReceiptService
 {
-    private readonly IReceiptRepository     _repo;
+    private readonly IReceiptRepository _repo;
     private readonly ITransactionRepository _txRepo;
 
     public ReceiptService(IReceiptRepository repo, ITransactionRepository txRepo)
     { _repo = repo; _txRepo = txRepo; }
 
-    // FIX: public static so it can be referenced from tests without instance
     public static string GenerateReferenceCode(int year, int batchId, int seq)
     {
         var bw = batchId > 999 ? "D4" : "D3";
-        var sw = seq     > 999 ? "D4" : "D3";
+        var sw = seq > 999 ? "D4" : "D3";
         return $"{year}-{batchId.ToString(bw)}-{seq.ToString(sw)}";
     }
 
@@ -169,12 +169,12 @@ public class ReceiptService
     {
         var ok = (current, next) switch
         {
-            (ReceiptBatchStatus.Draft,     ReceiptBatchStatus.Submitted)  => isCreator,
-            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Draft)      => isCreator,
-            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Approved)   => isOwner,
-            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Rejected)   => isOwner,
-            (ReceiptBatchStatus.Approved,  ReceiptBatchStatus.Reimbursed) => isOwner,
-            (ReceiptBatchStatus.Rejected,  ReceiptBatchStatus.Draft)      => isCreator,
+            (ReceiptBatchStatus.Draft, ReceiptBatchStatus.Submitted) => isCreator,
+            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Draft) => isCreator,
+            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Approved) => isOwner,
+            (ReceiptBatchStatus.Submitted, ReceiptBatchStatus.Rejected) => isOwner,
+            (ReceiptBatchStatus.Approved, ReceiptBatchStatus.Reimbursed) => isOwner,
+            (ReceiptBatchStatus.Rejected, ReceiptBatchStatus.Draft) => isCreator,
             _ => false
         };
         if (!ok) throw new InvalidOperationException($"Statusövergång {current} → {next} inte tillåten.");
@@ -184,9 +184,12 @@ public class ReceiptService
     {
         var batch = new ReceiptBatch
         {
-            BudgetId = budgetId, ProjectId = dto.ProjectId, Label = dto.Label,
+            BudgetId = budgetId,
+            ProjectId = dto.ProjectId,
+            Label = dto.Label,
             BatchCategoryId = dto.BatchCategoryId,
-            CreatedByUserId = userId, CreatedByEmail = userEmail
+            CreatedByUserId = userId,
+            CreatedByEmail = userEmail
         };
         return await _repo.CreateAsync(batch);
     }
@@ -198,12 +201,17 @@ public class ReceiptService
         if (batch.Status != ReceiptBatchStatus.Draft)
             throw new InvalidOperationException("Kan bara lägga till kvitton i utkast.");
 
-        var seq  = await _repo.GetNextSequenceNumberAsync(batchId);
+        var seq = await _repo.GetNextSequenceNumberAsync(batchId);
         var code = GenerateReferenceCode(DateTime.UtcNow.Year, batchId, seq);
         var line = new ReceiptLine
         {
-            BatchId = batchId, SequenceNumber = seq, ReferenceCode = code,
-            Date = dto.Date, Amount = dto.Amount, Vendor = dto.Vendor, Description = dto.Description
+            BatchId = batchId,
+            SequenceNumber = seq,
+            ReferenceCode = code,
+            Date = dto.Date,
+            Amount = dto.Amount,
+            Vendor = dto.Vendor,
+            Description = dto.Description
         };
         return await _repo.AddLineAsync(line);
     }
@@ -222,7 +230,7 @@ public class ReceiptService
         batch.Status = newStatus;
         switch (newStatus)
         {
-            case ReceiptBatchStatus.Submitted:   batch.SubmittedAt = now; break;
+            case ReceiptBatchStatus.Submitted: batch.SubmittedAt = now; break;
             case ReceiptBatchStatus.Approved:
                 batch.ApprovedAt = now; batch.ApprovedByUserId = actorUserId;
                 await CreateLinkedTransactionsAsync(batch);
@@ -231,8 +239,8 @@ public class ReceiptService
                 batch.RejectedAt = now; batch.RejectedByUserId = actorUserId;
                 batch.RejectionReason = rejectionReason;
                 break;
-            case ReceiptBatchStatus.Reimbursed:  batch.ReimbursedAt = now; break;
-            case ReceiptBatchStatus.Draft:        batch.SubmittedAt = null; break;
+            case ReceiptBatchStatus.Reimbursed: batch.ReimbursedAt = now; break;
+            case ReceiptBatchStatus.Draft: batch.SubmittedAt = null; break;
         }
         return await _repo.UpdateAsync(batch);
     }
@@ -245,11 +253,15 @@ public class ReceiptService
         {
             var tx = new Transaction
             {
-                BudgetId = batch.BudgetId, ProjectId = batch.ProjectId,
-                StartDate = line.Date, NetAmount = -Math.Abs(line.Amount),
+                BudgetId = batch.BudgetId,
+                ProjectId = batch.ProjectId,
+                StartDate = line.Date,
+                NetAmount = -Math.Abs(line.Amount),
                 Description = $"Utlägg [{line.ReferenceCode}]{(line.Vendor != null ? $": {line.Vendor}" : "")}",
-                CategoryId = 3, Type = TransactionType.Expense,
-                Recurrence = Recurrence.OneTime, IsActive = true,
+                CategoryId = 3,
+                Type = TransactionType.Expense,
+                Recurrence = Recurrence.OneTime,
+                IsActive = true,
                 CreatedByUserId = batch.CreatedByUserId
             };
             tx = await _txRepo.CreateAsync(tx);
@@ -293,7 +305,7 @@ public class ReceiptService
                     table.ColumnsDefinition(cols =>
                     {
                         cols.ConstantColumn(22); cols.ConstantColumn(80); cols.ConstantColumn(62);
-                        cols.RelativeColumn(2);  cols.RelativeColumn(3);  cols.ConstantColumn(55); cols.ConstantColumn(65);
+                        cols.RelativeColumn(2); cols.RelativeColumn(3); cols.ConstantColumn(55); cols.ConstantColumn(65);
                     });
                     table.Header(h =>
                     {
@@ -347,10 +359,10 @@ public class ReceiptService
 
     private static string SwedishStatus(ReceiptBatchStatus s) => s switch
     {
-        ReceiptBatchStatus.Draft      => "Utkast",
-        ReceiptBatchStatus.Submitted  => "Inskickad",
-        ReceiptBatchStatus.Approved   => "Godkänd",
-        ReceiptBatchStatus.Rejected   => "Avslagen",
+        ReceiptBatchStatus.Draft => "Utkast",
+        ReceiptBatchStatus.Submitted => "Inskickad",
+        ReceiptBatchStatus.Approved => "Godkänd",
+        ReceiptBatchStatus.Rejected => "Avslagen",
         ReceiptBatchStatus.Reimbursed => "Utbetald",
         _ => s.ToString()
     };
@@ -366,19 +378,16 @@ public interface IReceiptAttachmentService
 public class NoOpReceiptAttachmentService : IReceiptAttachmentService
 {
     public Task<string?> UploadAsync(int l, Stream d, string f, string m) => Task.FromResult<string?>(null);
-    public Task<string?> GetUrlAsync(int lineId)                          => Task.FromResult<string?>(null);
-    public Task DeleteAsync(int lineId)                                   => Task.CompletedTask;
+    public Task<string?> GetUrlAsync(int lineId) => Task.FromResult<string?>(null);
+    public Task DeleteAsync(int lineId) => Task.CompletedTask;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// JOURNAL QUERY SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class JournalQueryService
 {
-    private readonly ITransactionRepository   _txRepo;
+    private readonly ITransactionRepository _txRepo;
     private readonly IMilersattningRepository _miRepo;
-    private readonly IVabRepository           _vabRepo;
-    private readonly IReceiptRepository       _receiptRepo;
+    private readonly IVabRepository _vabRepo;
+    private readonly IReceiptRepository _receiptRepo;
 
     public JournalQueryService(ITransactionRepository txRepo, IMilersattningRepository miRepo,
         IVabRepository vabRepo, IReceiptRepository receiptRepo)
@@ -391,25 +400,25 @@ public class JournalQueryService
             : new HashSet<JournalEntryType>(Enum.GetValues<JournalEntryType>());
 
         var tasks = new List<Task<List<JournalEntryDto>>>();
-        if (include.Contains(JournalEntryType.Transaction))   tasks.Add(FetchTransactionsAsync(q));
+        if (include.Contains(JournalEntryType.Transaction)) tasks.Add(FetchTransactionsAsync(q));
         if (include.Contains(JournalEntryType.Milersattning)) tasks.Add(FetchMilersattningAsync(q));
-        if (include.Contains(JournalEntryType.Vab))           tasks.Add(FetchVabAsync(q));
-        if (include.Contains(JournalEntryType.ReceiptBatch))  tasks.Add(FetchReceiptsAsync(q));
+        if (include.Contains(JournalEntryType.Vab)) tasks.Add(FetchVabAsync(q));
+        if (include.Contains(JournalEntryType.ReceiptBatch)) tasks.Add(FetchReceiptsAsync(q));
 
         var all = (await Task.WhenAll(tasks)).SelectMany(r => r).ToList();
         all = ApplySharedFilters(all, q);
 
         all = (q.SortBy?.ToLower(), q.SortDir?.ToLower()) switch
         {
-            ("date",        "asc") => all.OrderBy(e => e.Date).ToList(),
-            ("date",        _)     => all.OrderByDescending(e => e.Date).ToList(),
-            ("amount",      "asc") => all.OrderBy(e => e.Amount).ToList(),
-            ("amount",      _)     => all.OrderByDescending(e => e.Amount).ToList(),
+            ("date", "asc") => all.OrderBy(e => e.Date).ToList(),
+            ("date", _) => all.OrderByDescending(e => e.Date).ToList(),
+            ("amount", "asc") => all.OrderBy(e => e.Amount).ToList(),
+            ("amount", _) => all.OrderByDescending(e => e.Amount).ToList(),
             ("description", "asc") => all.OrderBy(e => e.Description).ToList(),
-            ("description", _)     => all.OrderByDescending(e => e.Description).ToList(),
-            ("type",        "asc") => all.OrderBy(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
-            ("type",        _)     => all.OrderByDescending(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
-            _                      => all.OrderByDescending(e => e.Date).ToList()
+            ("description", _) => all.OrderByDescending(e => e.Description).ToList(),
+            ("type", "asc") => all.OrderBy(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
+            ("type", _) => all.OrderByDescending(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
+            _ => all.OrderByDescending(e => e.Date).ToList()
         };
 
         var total = all.Count;
@@ -424,10 +433,10 @@ public class JournalQueryService
 
         return new SummaryDto
         {
-            FilteredIncome   = countable.Where(e => e.Amount > 0).Sum(e => e.Amount),
+            FilteredIncome = countable.Where(e => e.Amount > 0).Sum(e => e.Amount),
             FilteredExpenses = countable.Where(e => e.Amount < 0).Sum(e => e.Amount),
-            MonthlyIncome    = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount > 0).Sum(e => e.Amount),
-            MonthlyExpenses  = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount < 0).Sum(e => e.Amount),
+            MonthlyIncome = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount > 0).Sum(e => e.Amount),
+            MonthlyExpenses = countable.Where(e => e.EntryType == JournalEntryType.Transaction && e.Amount < 0).Sum(e => e.Amount),
         };
     }
 
@@ -435,26 +444,40 @@ public class JournalQueryService
     {
         var tq = new TransactionQuery
         {
-            BudgetId          = q.BudgetId, Page = 1, PageSize = int.MaxValue,
-            FilterByStartDate = q.FilterByStartDate, StartDate = q.StartDate,
-            FilterByEndDate   = q.FilterByEndDate,   EndDate   = q.EndDate,
-            FilterByCategory  = q.FilterByCategory,  CategoryId = q.CategoryId,
-            ProjectId         = q.FilterByProject ? q.ProjectId : null
+            BudgetId = q.BudgetId,
+            Page = 1,
+            PageSize = int.MaxValue,
+            FilterByStartDate = q.FilterByStartDate,
+            StartDate = q.StartDate,
+            FilterByEndDate = q.FilterByEndDate,
+            EndDate = q.EndDate,
+            FilterByCategory = q.FilterByCategory,
+            CategoryId = q.CategoryId,
+            ProjectId = q.FilterByProject ? q.ProjectId : null
         };
         var (txs, _) = await _txRepo.GetPagedAsync(tq);
         return txs.Select(t => new JournalEntryDto
         {
-            EntryType     = JournalEntryType.Transaction,
-            TypeLabel     = "Transaktion", TypeCode = "T",
-            Date          = t.StartDate, EndDate = t.EndDate,
-            Amount        = t.NetAmount, Description = t.Description,
-            CategoryName  = t.Category?.Name, ProjectName = t.Project?.Name,
-            SourceId      = t.Id, HasDetail = t.HasKontering,
+            EntryType = JournalEntryType.Transaction,
+            TypeLabel = "Transaktion",
+            TypeCode = "T",
+            Date = t.StartDate,
+            EndDate = t.EndDate,
+            Amount = t.NetAmount,
+            Description = t.Description,
+            CategoryName = t.Category?.Name,
+            ProjectName = t.Project?.Name,
+            SourceId = t.Id,
+            HasDetail = t.HasKontering,
             CreatedByEmail = t.CreatedByUserId,
             KonteringRows = t.KonteringRows.Select(k => new KonteringRowDto
             {
-                Id = k.Id, KontoNr = k.KontoNr, CostCenter = k.CostCenter,
-                Amount = k.Amount, Percentage = k.Percentage, Description = k.Description
+                Id = k.Id,
+                KontoNr = k.KontoNr,
+                CostCenter = k.CostCenter,
+                Amount = k.Amount,
+                Percentage = k.Percentage,
+                Description = k.Description
             }).ToList()
         }).ToList();
     }
@@ -464,11 +487,16 @@ public class JournalQueryService
         var items = await _miRepo.GetForBudgetAsync(q.BudgetId, q.FilterByCreatedBy ? q.CreatedByUserId : null);
         return items.Select(m => new JournalEntryDto
         {
-            EntryType = JournalEntryType.Milersattning, TypeLabel = "Milersättning", TypeCode = "M",
-            Date = m.TripDate, Amount = m.ReimbursementAmount,
+            EntryType = JournalEntryType.Milersattning,
+            TypeLabel = "Milersättning",
+            TypeCode = "M",
+            Date = m.TripDate,
+            Amount = m.ReimbursementAmount,
             Description = $"{m.FromLocation} → {m.ToLocation}",
-            MetaLine    = $"{m.DistanceKm:N0} km · {m.RatePerKm:N2} kr/km",
-            SourceId    = m.Id, HasDetail = false, CreatedByEmail = m.UserId
+            MetaLine = $"{m.DistanceKm:N0} km · {m.RatePerKm:N2} kr/km",
+            SourceId = m.Id,
+            HasDetail = false,
+            CreatedByEmail = m.UserId
         }).ToList();
     }
 
@@ -477,11 +505,17 @@ public class JournalQueryService
         var items = await _vabRepo.GetForBudgetAsync(q.BudgetId, q.FilterByCreatedBy ? q.CreatedByUserId : null);
         return items.Select(v => new JournalEntryDto
         {
-            EntryType = JournalEntryType.Vab, TypeLabel = "VAB", TypeCode = "V",
-            Date = v.StartDate, EndDate = v.EndDate, Amount = -v.TotalAmount,
+            EntryType = JournalEntryType.Vab,
+            TypeLabel = "VAB",
+            TypeCode = "V",
+            Date = v.StartDate,
+            EndDate = v.EndDate,
+            Amount = -v.TotalAmount,
             Description = v.ChildName != null ? $"VAB · {v.ChildName}" : "VAB",
-            MetaLine    = $"{v.TotalDays} dagar · {v.StartDate:d}–{v.EndDate:d}",
-            SourceId    = v.Id, HasDetail = false, CreatedByEmail = v.UserId
+            MetaLine = $"{v.TotalDays} dagar · {v.StartDate:d}–{v.EndDate:d}",
+            SourceId = v.Id,
+            HasDetail = false,
+            CreatedByEmail = v.UserId
         }).ToList();
     }
 
@@ -489,24 +523,32 @@ public class JournalQueryService
     {
         var rq = new ReceiptQuery
         {
-            BudgetId  = q.BudgetId, Page = 1, PageSize = int.MaxValue,
+            BudgetId = q.BudgetId,
+            Page = 1,
+            PageSize = int.MaxValue,
             ProjectId = q.FilterByProject ? q.ProjectId : null,
-            Statuses  = q.ReceiptStatuses.Any() ? q.ReceiptStatuses : null,
+            Statuses = q.ReceiptStatuses.Any() ? q.ReceiptStatuses : null,
             CreatedByUserId = q.FilterByCreatedBy ? q.CreatedByUserId : null,
-            FromDate  = q.FilterByStartDate ? q.StartDate : null,
-            ToDate    = q.FilterByEndDate   ? q.EndDate   : null
+            FromDate = q.FilterByStartDate ? q.StartDate : null,
+            ToDate = q.FilterByEndDate ? q.EndDate : null
         };
         var (batches, _) = await _receiptRepo.GetPagedAsync(rq);
         return batches.Select(b => new JournalEntryDto
         {
-            EntryType     = JournalEntryType.ReceiptBatch,
-            TypeLabel     = "Kvitto", TypeCode = "K",
-            Date          = b.CreatedAt, Amount = b.Lines.Sum(l => l.Amount),
-            Description   = b.Label, CategoryName = b.Category?.Name, ProjectName = b.Project?.Name,
-            Status        = SwedishStatus(b.Status),
+            EntryType = JournalEntryType.ReceiptBatch,
+            TypeLabel = "Kvitto",
+            TypeCode = "K",
+            Date = b.CreatedAt,
+            Amount = b.Lines.Sum(l => l.Amount),
+            Description = b.Label,
+            CategoryName = b.Category?.Name,
+            ProjectName = b.Project?.Name,
+            Status = SwedishStatus(b.Status),
             ReferenceCode = $"{DateTime.UtcNow.Year}-{b.Id:D3}-*",
-            SourceId      = b.Id, HasDetail = b.Lines.Any(),
-            ReceiptLineCount = b.Lines.Count, MetaLine = $"{b.Lines.Count} kvitton",
+            SourceId = b.Id,
+            HasDetail = b.Lines.Any(),
+            ReceiptLineCount = b.Lines.Count,
+            MetaLine = $"{b.Lines.Count} kvitton",
             CreatedByEmail = b.CreatedByEmail
         }).ToList();
     }
@@ -529,18 +571,15 @@ public class JournalQueryService
 
     private static string SwedishStatus(ReceiptBatchStatus s) => s switch
     {
-        ReceiptBatchStatus.Draft      => "Utkast",
-        ReceiptBatchStatus.Submitted  => "Inskickad",
-        ReceiptBatchStatus.Approved   => "Godkänd",
-        ReceiptBatchStatus.Rejected   => "Avslagen",
+        ReceiptBatchStatus.Draft => "Utkast",
+        ReceiptBatchStatus.Submitted => "Inskickad",
+        ReceiptBatchStatus.Approved => "Godkänd",
+        ReceiptBatchStatus.Rejected => "Avslagen",
         ReceiptBatchStatus.Reimbursed => "Utbetald",
         _ => s.ToString()
     };
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXPORT SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ExportService
 {
     static ExportService() => QuestPDF.Settings.License = LicenseType.Community;
@@ -597,8 +636,17 @@ public class ExportService
                 {
                     var inc = transactions.Where(t => t.NetAmount > 0).Sum(t => t.NetAmount);
                     var exp = transactions.Where(t => t.NetAmount < 0).Sum(t => t.NetAmount);
-                    r.RelativeItem().Text($"{transactions.Count} poster | Inkomster: {inc:N2} kr | Utgifter: {exp:N2} kr | Netto: {inc+exp:N2} kr").FontSize(8);
-                    r.ConstantItem(60).AlignRight().Text(x => { x.Span("Sida "); x.CurrentPageNumber(); x.Span(" av "); x.TotalPages(); }).FontSize(8);
+                    r.RelativeItem().Text($"{transactions.Count} poster | Inkomster: {inc:N2} kr | Utgifter: {exp:N2} kr | Netto: {inc + exp:N2} kr").FontSize(8);
+
+                    r.ConstantItem(60)
+                     .AlignRight()
+                     .DefaultTextStyle(x => x.FontSize(8))
+                     .Text(x => {
+                         x.Span("Sida ");
+                         x.CurrentPageNumber();
+                         x.Span(" av ");
+                         x.TotalPages();
+                     });
                 });
             });
         }).GeneratePdf();
@@ -608,7 +656,6 @@ public class ExportService
     {
         using var wb = new XLWorkbook();
 
-        // Sheet 1 – Transactions
         var ws = wb.AddWorksheet("Transaktioner");
         var hdrs = new[] { "Datum", "Slut", "Beskrivning", "Kategori", "Typ", "Återkommande", "Månad", "%", "Brutto", "Belopp", "Projekt", "Kontering" };
         for (var i = 0; i < hdrs.Length; i++)
@@ -621,15 +668,15 @@ public class ExportService
         for (var i = 0; i < transactions.Count; i++)
         {
             var tx = transactions[i]; var row = i + 2;
-            ws.Cell(row, 1).Value  = tx.StartDate.ToString("yyyy-MM-dd");
-            ws.Cell(row, 2).Value  = tx.EndDate?.ToString("yyyy-MM-dd") ?? "";
-            ws.Cell(row, 3).Value  = tx.Description ?? "";
-            ws.Cell(row, 4).Value  = tx.CategoryName;
-            ws.Cell(row, 5).Value  = tx.Type.ToString();
-            ws.Cell(row, 6).Value  = tx.Recurrence.ToString();
-            ws.Cell(row, 7).Value  = tx.Month?.ToString() ?? "";
-            ws.Cell(row, 8).Value  = (double?)tx.Rate ?? 0;
-            ws.Cell(row, 9).Value  = (double?)tx.GrossAmount ?? 0;
+            ws.Cell(row, 1).Value = tx.StartDate.ToString("yyyy-MM-dd");
+            ws.Cell(row, 2).Value = tx.EndDate?.ToString("yyyy-MM-dd") ?? "";
+            ws.Cell(row, 3).Value = tx.Description ?? "";
+            ws.Cell(row, 4).Value = tx.CategoryName;
+            ws.Cell(row, 5).Value = tx.Type.ToString();
+            ws.Cell(row, 6).Value = tx.Recurrence.ToString();
+            ws.Cell(row, 7).Value = tx.Month?.ToString() ?? "";
+            ws.Cell(row, 8).Value = (double?)tx.Rate ?? 0;
+            ws.Cell(row, 9).Value = (double?)tx.GrossAmount ?? 0;
             ws.Cell(row, 10).Value = (double)tx.NetAmount;
             ws.Cell(row, 11).Value = tx.ProjectName ?? "";
             ws.Cell(row, 12).Value = tx.HasKontering ? "Ja" : "";
@@ -637,9 +684,8 @@ public class ExportService
         }
         ws.Columns().AdjustToContents(); ws.SheetView.FreezeRows(1);
 
-        // Sheet 2 – Monthly
         var ws2 = wb.AddWorksheet("Månadssammanfattning");
-        ws2.Cell(1,1).Value="Månad"; ws2.Cell(1,2).Value="Inkomster"; ws2.Cell(1,3).Value="Utgifter"; ws2.Cell(1,4).Value="Netto";
+        ws2.Cell(1, 1).Value = "Månad"; ws2.Cell(1, 2).Value = "Inkomster"; ws2.Cell(1, 3).Value = "Utgifter"; ws2.Cell(1, 4).Value = "Netto";
         ws2.Row(1).Style.Font.Bold = true;
         ws2.Row(1).Style.Fill.BackgroundColor = XLColor.FromHtml("#1976D2");
         ws2.Row(1).Style.Font.FontColor = XLColor.White;
@@ -648,32 +694,30 @@ public class ExportService
         var rw2 = 2;
         foreach (var g in monthly)
         {
-            ws2.Cell(rw2,1).Value = g.Key;
-            ws2.Cell(rw2,2).Value = (double)g.Where(t => t.NetAmount > 0).Sum(t => t.NetAmount);
-            ws2.Cell(rw2,3).Value = (double)g.Where(t => t.NetAmount < 0).Sum(t => t.NetAmount);
-            ws2.Cell(rw2,4).Value = (double)g.Sum(t => t.NetAmount);
+            ws2.Cell(rw2, 1).Value = g.Key;
+            ws2.Cell(rw2, 2).Value = (double)g.Where(t => t.NetAmount > 0).Sum(t => t.NetAmount);
+            ws2.Cell(rw2, 3).Value = (double)g.Where(t => t.NetAmount < 0).Sum(t => t.NetAmount);
+            ws2.Cell(rw2, 4).Value = (double)g.Sum(t => t.NetAmount);
             rw2++;
         }
         ws2.Columns().AdjustToContents();
 
-        // Sheet 3 – Projects
         var ws3 = wb.AddWorksheet("Projekt");
-        ws3.Cell(1,1).Value="Projekt"; ws3.Cell(1,2).Value="Budget"; ws3.Cell(1,3).Value="Spenderat"; ws3.Cell(1,4).Value="Återstår"; ws3.Cell(1,5).Value="Progress %";
+        ws3.Cell(1, 1).Value = "Projekt"; ws3.Cell(1, 2).Value = "Budget"; ws3.Cell(1, 3).Value = "Spenderat"; ws3.Cell(1, 4).Value = "Återstår"; ws3.Cell(1, 5).Value = "Progress %";
         ws3.Row(1).Style.Font.Bold = true;
         ws3.Row(1).Style.Fill.BackgroundColor = XLColor.FromHtml("#1976D2");
         ws3.Row(1).Style.Font.FontColor = XLColor.White;
         for (var i = 0; i < projects.Count; i++)
         {
             var p = projects[i];
-            ws3.Cell(i+2,1).Value=(double)p.BudgetAmount; ws3.Cell(i+2,2).Value=p.Name;
-            ws3.Cell(i+2,3).Value=(double)p.SpentAmount;  ws3.Cell(i+2,4).Value=(double)p.RemainingAmount;
-            ws3.Cell(i+2,5).Value=p.ProgressPercent;
+            ws3.Cell(i + 2, 1).Value = (double)p.BudgetAmount; ws3.Cell(i + 2, 2).Value = p.Name;
+            ws3.Cell(i + 2, 3).Value = (double)p.SpentAmount; ws3.Cell(i + 2, 4).Value = (double)p.RemainingAmount;
+            ws3.Cell(i + 2, 5).Value = p.ProgressPercent;
         }
         ws3.Columns().AdjustToContents();
 
-        // Sheet 4 – Kontering
         var ws4 = wb.AddWorksheet("Kontering");
-        ws4.Cell(1,1).Value="Transaktion"; ws4.Cell(1,2).Value="Konto Nr"; ws4.Cell(1,3).Value="Kostnadsst."; ws4.Cell(1,4).Value="Belopp"; ws4.Cell(1,5).Value="%"; ws4.Cell(1,6).Value="Beskrivning";
+        ws4.Cell(1, 1).Value = "Transaktion"; ws4.Cell(1, 2).Value = "Konto Nr"; ws4.Cell(1, 3).Value = "Kostnadsst."; ws4.Cell(1, 4).Value = "Belopp"; ws4.Cell(1, 5).Value = "%"; ws4.Cell(1, 6).Value = "Beskrivning";
         ws4.Row(1).Style.Font.Bold = true;
         ws4.Row(1).Style.Fill.BackgroundColor = XLColor.FromHtml("#1976D2");
         ws4.Row(1).Style.Font.FontColor = XLColor.White;
@@ -681,10 +725,10 @@ public class ExportService
         foreach (var tx in transactions.Where(t => t.HasKontering))
             foreach (var k in tx.KonteringRows)
             {
-                ws4.Cell(kr,1).Value=$"{tx.StartDate:yyyy-MM-dd} {tx.Description}";
-                ws4.Cell(kr,2).Value=k.KontoNr; ws4.Cell(kr,3).Value=k.CostCenter??"";
-                ws4.Cell(kr,4).Value=(double)k.Amount; ws4.Cell(kr,5).Value=(double?)k.Percentage??0;
-                ws4.Cell(kr,6).Value=k.Description??""; kr++;
+                ws4.Cell(kr, 1).Value = $"{tx.StartDate:yyyy-MM-dd} {tx.Description}";
+                ws4.Cell(kr, 2).Value = k.KontoNr; ws4.Cell(kr, 3).Value = k.CostCenter ?? "";
+                ws4.Cell(kr, 4).Value = (double)k.Amount; ws4.Cell(kr, 5).Value = (double?)k.Percentage ?? 0;
+                ws4.Cell(kr, 6).Value = k.Description ?? ""; kr++;
             }
         ws4.Columns().AdjustToContents();
 
@@ -694,22 +738,19 @@ public class ExportService
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// IMPORT SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public abstract class BankCsvProfile
 {
     public abstract string BankName { get; }
-    public abstract char   Delimiter { get; }
-    public abstract int    SkipRows { get; }
+    public abstract char Delimiter { get; }
+    public abstract int SkipRows { get; }
     public abstract string DateColumn { get; }
     public abstract string AmountColumn { get; }
     public abstract string DescriptionColumn { get; }
     public abstract string DateFormat { get; }
 }
 
-public class SebProfile        : BankCsvProfile { public override string BankName => "SEB"; public override char Delimiter => ';'; public override int SkipRows => 1; public override string DateColumn => "Bokföringsdag"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Beskrivning"; public override string DateFormat => "yyyy-MM-dd"; }
-public class SwedbankProfile   : BankCsvProfile { public override string BankName => "Swedbank"; public override char Delimiter => ';'; public override int SkipRows => 4; public override string DateColumn => "Datum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Text"; public override string DateFormat => "yyyy-MM-dd"; }
+public class SebProfile : BankCsvProfile { public override string BankName => "SEB"; public override char Delimiter => ';'; public override int SkipRows => 1; public override string DateColumn => "Bokföringsdag"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Beskrivning"; public override string DateFormat => "yyyy-MM-dd"; }
+public class SwedbankProfile : BankCsvProfile { public override string BankName => "Swedbank"; public override char Delimiter => ';'; public override int SkipRows => 4; public override string DateColumn => "Datum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Text"; public override string DateFormat => "yyyy-MM-dd"; }
 public class HandelsbankenProfile : BankCsvProfile { public override string BankName => "Handelsbanken"; public override char Delimiter => '\t'; public override int SkipRows => 1; public override string DateColumn => "Transaktionsdatum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Transaktionstext"; public override string DateFormat => "dd/MM/yyyy"; }
 
 public class ImportService
@@ -724,12 +765,12 @@ public class ImportService
     public async Task<ImportSessionDto> PreviewAsync(Stream fileStream, string bankProfile, int budgetId)
     {
         var profile = GetProfiles().FirstOrDefault(p => p.BankName == bankProfile) ?? new SebProfile();
-        var rows    = ParseCsv(fileStream, profile);
+        var rows = ParseCsv(fileStream, profile);
         var existing = await _txRepo.GetForExportAsync(new TransactionQuery
         {
-            BudgetId          = budgetId,
+            BudgetId = budgetId,
             FilterByStartDate = true,
-            StartDate         = rows.Any() ? rows.Min(r => r.Date).AddDays(-1) : DateTime.Today.AddMonths(-6)
+            StartDate = rows.Any() ? rows.Min(r => r.Date).AddDays(-1) : DateTime.Today.AddMonths(-6)
         });
 
         foreach (var row in rows)
@@ -738,7 +779,7 @@ public class ImportService
                 t.StartDate.Date == row.Date.Date &&
                 Math.Abs(t.NetAmount - row.Amount) < 0.01m &&
                 string.Equals(t.Description?.Trim(), row.Description?.Trim(), StringComparison.OrdinalIgnoreCase));
-            row.SuggestedCategoryId   = SuggestCategory(row.Description);
+            row.SuggestedCategoryId = SuggestCategory(row.Description);
             row.SuggestedCategoryName = GetCategoryName(row.SuggestedCategoryId);
         }
 
@@ -757,11 +798,15 @@ public class ImportService
         {
             await _txRepo.CreateAsync(new Transaction
             {
-                BudgetId        = budgetId, StartDate = r.Date, NetAmount = r.Amount,
-                Description     = r.Description,
-                CategoryId      = r.SuggestedCategoryId ?? dto.DefaultCategoryId,
-                Type            = r.Amount >= 0 ? TransactionType.Income : TransactionType.Expense,
-                Recurrence      = Recurrence.OneTime, IsActive = true, CreatedByUserId = userId
+                BudgetId = budgetId,
+                StartDate = r.Date,
+                NetAmount = r.Amount,
+                Description = r.Description,
+                CategoryId = r.SuggestedCategoryId ?? dto.DefaultCategoryId,
+                Type = r.Amount >= 0 ? TransactionType.Income : TransactionType.Expense,
+                Recurrence = Recurrence.OneTime,
+                IsActive = true,
+                CreatedByUserId = userId
             });
         }
         _sessions.Remove(dto.SessionId);
@@ -773,8 +818,10 @@ public class ImportService
         var rows = new List<ImportRowDto>();
         var config = new CsvConfiguration(new CultureInfo("sv-SE"))
         {
-            Delimiter = profile.Delimiter.ToString(), HasHeaderRecord = true,
-            BadDataFound = null, MissingFieldFound = null
+            Delimiter = profile.Delimiter.ToString(),
+            HasHeaderRecord = true,
+            BadDataFound = null,
+            MissingFieldFound = null
         };
         using var reader = new StreamReader(stream);
         for (var i = 0; i < profile.SkipRows - 1; i++) reader.ReadLine();
@@ -784,9 +831,9 @@ public class ImportService
         {
             try
             {
-                var dateStr   = csv.GetField(profile.DateColumn) ?? "";
-                var amountStr = (csv.GetField(profile.AmountColumn) ?? "").Replace(" ", "").Replace(",", ".").Replace("\u00a0","");
-                var desc      = csv.GetField(profile.DescriptionColumn)?.Trim();
+                var dateStr = csv.GetField(profile.DateColumn) ?? "";
+                var amountStr = (csv.GetField(profile.AmountColumn) ?? "").Replace(" ", "").Replace(",", ".").Replace("\u00a0", "");
+                var desc = csv.GetField(profile.DescriptionColumn)?.Trim();
                 if (!DateTime.TryParseExact(dateStr, profile.DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) continue;
                 if (!decimal.TryParse(amountStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var amount)) continue;
                 rows.Add(new ImportRowDto { RowIndex = idx++, Date = date, Amount = amount, Description = desc, Selected = true });
@@ -808,5 +855,5 @@ public class ImportService
         return null;
     }
 
-    private static string? GetCategoryName(int? id) => id switch { 1=>"Mat",2=>"Hus & drift",3=>"Transport",6=>"Streaming-tjänster",8=>"Lön",_=>null };
+    private static string? GetCategoryName(int? id) => id switch { 1 => "Mat", 2 => "Hus & drift", 3 => "Transport", 6 => "Streaming-tjänster", 8 => "Lön", _ => null };
 }

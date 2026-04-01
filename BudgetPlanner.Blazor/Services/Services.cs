@@ -8,22 +8,20 @@ using BudgetPlanner.Core.DTOs;
 using BudgetPlanner.Core.Services;
 using BudgetPlanner.DAL.Repositories;
 using BudgetPlanner.Domain.Enums;
+using BudgetPlanner.Domain.Models; // SAKNADES TIDIGARE
 
 namespace BudgetPlanner.Blazor.Services;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// JWT AUTH
-// ═══════════════════════════════════════════════════════════════════════════════
 public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private static string?  _accessToken;
+    private static string? _accessToken;
     private static UserDto? _currentUser;
     private readonly HttpClient _http;
 
     public JwtAuthenticationStateProvider(HttpClient http) => _http = http;
 
-    public static string?  AccessToken  => _accessToken;
-    public static UserDto? CurrentUser  => _currentUser;
+    public static string? AccessToken => _accessToken;
+    public static UserDto? CurrentUser => _currentUser;
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
@@ -39,7 +37,7 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
                 if (result != null) { SetToken(result.AccessToken, result.User); return Build(result.AccessToken); }
             }
         }
-        catch { /* no cookie / network error */ }
+        catch { }
 
         ClearToken();
         return Anonymous();
@@ -60,8 +58,8 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     private static AuthenticationState Build(string token)
     {
         var handler = new JwtSecurityTokenHandler();
-        var jwt     = handler.ReadJwtToken(token);
-        var id      = new ClaimsIdentity(jwt.Claims, "jwt");
+        var jwt = handler.ReadJwtToken(token);
+        var id = new ClaimsIdentity(jwt.Claims, "jwt");
         return new AuthenticationState(new ClaimsPrincipal(id));
     }
 
@@ -75,9 +73,6 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// HTTP HANDLER (attaches Bearer, retries on 401)
-// ═══════════════════════════════════════════════════════════════════════════════
 public class AuthorizationMessageHandler : DelegatingHandler
 {
     private readonly JwtAuthenticationStateProvider _auth;
@@ -104,7 +99,7 @@ public class AuthorizationMessageHandler : DelegatingHandler
             try
             {
                 using var refreshClient = new HttpClient(new HttpClientHandler())
-                    { BaseAddress = new Uri(request.RequestUri!.GetLeftPart(UriPartial.Authority)) };
+                { BaseAddress = new Uri(request.RequestUri!.GetLeftPart(UriPartial.Authority)) };
                 var rr = await refreshClient.PostAsync("api/auth/refresh", null, ct);
                 if (rr.IsSuccessStatusCode)
                 {
@@ -125,9 +120,6 @@ public class AuthorizationMessageHandler : DelegatingHandler
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// BASE API SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public abstract class ApiServiceBase
 {
     protected readonly HttpClient Http;
@@ -150,9 +142,6 @@ public abstract class ApiServiceBase
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AUTH SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class AuthService : ApiServiceBase
 {
     private readonly JwtAuthenticationStateProvider _provider;
@@ -182,9 +171,6 @@ public class AuthService : ApiServiceBase
     public UserDto? CurrentUser => JwtAuthenticationStateProvider.CurrentUser;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// BUDGET SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class BudgetService : ApiServiceBase
 {
     public BudgetService(HttpClient http) : base(http) { }
@@ -196,9 +182,6 @@ public class BudgetService : ApiServiceBase
         await PostAsync<object>($"api/budgets/{budgetId}/invite", dto);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// PROJECT SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ProjectService : ApiServiceBase
 {
     public ProjectService(HttpClient http) : base(http) { }
@@ -212,9 +195,6 @@ public class ProjectService : ApiServiceBase
         await DeleteAsync($"api/budgets/{budgetId}/projects/{id}");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TRANSACTION SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class TransactionService : ApiServiceBase
 {
     public TransactionService(HttpClient http) : base(http) { }
@@ -239,9 +219,6 @@ public class TransactionService : ApiServiceBase
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// JOURNAL API SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class JournalApiService : ApiServiceBase
 {
     public JournalApiService(HttpClient http) : base(http) { }
@@ -266,7 +243,7 @@ public class JournalApiService : ApiServiceBase
             $"page={q.Page}", $"pageSize={q.PageSize}",
             $"sortBy={q.SortBy ?? "Date"}", $"sortDir={q.SortDir ?? "desc"}"
         };
-        foreach (var t in q.IncludeTypes)   parts.Add($"includeTypes={t}");
+        foreach (var t in q.IncludeTypes) parts.Add($"includeTypes={t}");
         foreach (var s in q.ReceiptStatuses) parts.Add($"receiptStatuses={s}");
         parts.AddRange(FilterParts(q));
         return $"api/budgets/{budgetId}/journal?" + string.Join("&", parts);
@@ -277,24 +254,21 @@ public class JournalApiService : ApiServiceBase
     private static List<string> FilterParts(JournalQuery q)
     {
         var p = new List<string>();
-        if (q.FilterByStartDate   && q.StartDate.HasValue)   p.Add($"filterByStartDate=true&startDate={q.StartDate:yyyy-MM-dd}");
-        if (q.FilterByEndDate     && q.EndDate.HasValue)     p.Add($"filterByEndDate=true&endDate={q.EndDate:yyyy-MM-dd}");
+        if (q.FilterByStartDate && q.StartDate.HasValue) p.Add($"filterByStartDate=true&startDate={q.StartDate:yyyy-MM-dd}");
+        if (q.FilterByEndDate && q.EndDate.HasValue) p.Add($"filterByEndDate=true&endDate={q.EndDate:yyyy-MM-dd}");
         if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description)) p.Add($"filterByDescription=true&description={Uri.EscapeDataString(q.Description)}");
-        if (q.FilterByCategory    && q.CategoryId.HasValue)  p.Add($"filterByCategory=true&categoryId={q.CategoryId}");
-        if (q.FilterByProject     && q.ProjectId.HasValue)   p.Add($"filterByProject=true&projectId={q.ProjectId}");
+        if (q.FilterByCategory && q.CategoryId.HasValue) p.Add($"filterByCategory=true&categoryId={q.CategoryId}");
+        if (q.FilterByProject && q.ProjectId.HasValue) p.Add($"filterByProject=true&projectId={q.ProjectId}");
         return p;
     }
 
     private class JournalPageResponse
     {
-        public PagedResult<JournalEntryDto> Result  { get; set; } = new();
-        public SummaryDto                   Summary { get; set; } = new();
+        public PagedResult<JournalEntryDto> Result { get; set; } = new();
+        public SummaryDto Summary { get; set; } = new();
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// RECEIPT API SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ReceiptApiService : ApiServiceBase
 {
     public ReceiptApiService(HttpClient http) : base(http) { }
@@ -340,9 +314,6 @@ public class ReceiptApiService : ApiServiceBase
         $"api/budgets/{budgetId}/receipts/{batchId}/export/pdf";
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MILERSÄTTNING SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class MilersattningApiService : ApiServiceBase
 {
     public MilersattningApiService(HttpClient http) : base(http) { }
@@ -360,9 +331,6 @@ public class MilersattningApiService : ApiServiceBase
     private class RateWrapper { public decimal Rate { get; set; } }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// VAB SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class VabApiService : ApiServiceBase
 {
     public VabApiService(HttpClient http) : base(http) { }
@@ -374,9 +342,6 @@ public class VabApiService : ApiServiceBase
         await DeleteAsync($"api/budgets/{budgetId}/vab/{id}");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// IMPORT SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ImportApiService : ApiServiceBase
 {
     public ImportApiService(HttpClient http) : base(http) { }
@@ -400,9 +365,6 @@ public class ImportApiService : ApiServiceBase
     private class ImportResult { public int Imported { get; set; } }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// REPORTS SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ReportsApiService : ApiServiceBase
 {
     public ReportsApiService(HttpClient http) : base(http) { }
@@ -412,14 +374,11 @@ public class ReportsApiService : ApiServiceBase
     {
         var url = $"api/budgets/{budgetId}/reports/category-breakdown";
         if (from.HasValue) url += $"?from={from:yyyy-MM-dd}";
-        if (to.HasValue)   url += (from.HasValue ? "&" : "?") + $"to={to:yyyy-MM-dd}";
+        if (to.HasValue) url += (from.HasValue ? "&" : "?") + $"to={to:yyyy-MM-dd}";
         return GetAsync<List<CategoryBreakdownItem>>(url);
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TOAST SERVICE
-// ═══════════════════════════════════════════════════════════════════════════════
 public class ToastService
 {
     public List<ToastMessage> Toasts { get; } = new();
@@ -428,15 +387,20 @@ public class ToastService
     public void Show(string message, string type = "info", int durationMs = 4000)
     {
         var id = Guid.NewGuid().ToString();
-        Toasts.Add(new ToastMessage { Id = id, Message = message, Type = type,
-            Icon = type switch { "success" => "check_circle", "error" => "error", _ => "info" } });
+        Toasts.Add(new ToastMessage
+        {
+            Id = id,
+            Message = message,
+            Type = type,
+            Icon = type switch { "success" => "check_circle", "error" => "error", _ => "info" }
+        });
         OnChange?.Invoke();
         _ = Task.Delay(durationMs).ContinueWith(_ => { Remove(id); });
     }
 
     public void Success(string m) => Show(m, "success");
-    public void Error(string m)   => Show(m, "error");
-    public void Info(string m)    => Show(m, "info");
+    public void Error(string m) => Show(m, "error");
+    public void Info(string m) => Show(m, "info");
 
     public void Remove(string id) { Toasts.RemoveAll(t => t.Id == id); OnChange?.Invoke(); }
 }

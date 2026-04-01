@@ -3,8 +3,7 @@
 @using BudgetPlanner.Blazor.Components.Forms
 
 <div class="card">
-    <div class="card-title">@(_dto.Id == 0 ? "Ny post" : "Redigera post")</div>
-
+    <div class="card-title">@(EditTransaction == null || EditTransaction.Id == 0 ? "Ny post" : "Redigera post")</div>
     @if (!string.IsNullOrEmpty(_error))
     {
         <div style="color:var(--color-expense);font-size:.85rem;margin-bottom:8px">@_error</div>
