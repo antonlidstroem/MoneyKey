@@ -53,9 +53,23 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.NetAmount).HasColumnType("decimal(18,2)");
             e.Property(x => x.GrossAmount).HasColumnType("decimal(18,2)");
             e.Property(x => x.Rate).HasColumnType("decimal(18,4)");
-            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.Project).WithMany(p => p.Transactions).HasForeignKey(x => x.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
-            e.HasMany(x => x.KonteringRows).WithOne(k => k.Transaction).HasForeignKey(k => k.TransactionId).OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ÄNDRA DENNA RAD: Från SetNull till Restrict
+            e.HasOne(x => x.Project)
+                .WithMany(p => p.Transactions)
+                .HasForeignKey(x => x.ProjectId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict); // <--- Ändrad här från SetNull
+
+            e.HasMany(x => x.KonteringRows)
+                .WithOne(k => k.Transaction)
+                .HasForeignKey(k => k.TransactionId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<Project>(e => {
@@ -76,7 +90,13 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.DistanceKm).HasColumnType("decimal(10,2)");
             e.Property(x => x.RatePerKm).HasColumnType("decimal(10,4)");
             e.Ignore(x => x.ReimbursementAmount);
-            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+
+            // ÄNDRA HÄR: Från SetNull till Restrict
+            e.HasOne(x => x.LinkedTransaction)
+                .WithMany()
+                .HasForeignKey(x => x.LinkedTransactionId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<VabEntry>(e => {
@@ -85,7 +105,13 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Rate).HasColumnType("decimal(5,4)");
             e.Ignore(x => x.TotalDays);
             e.Ignore(x => x.TotalAmount);
-            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+
+            // ÄNDRA HÄR: Från SetNull till Restrict
+            e.HasOne(x => x.LinkedTransaction)
+                .WithMany()
+                .HasForeignKey(x => x.LinkedTransactionId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<ReceiptBatchCategory>(e => {
@@ -96,11 +122,28 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
         mb.Entity<ReceiptBatch>(e => {
             e.HasKey(x => x.Id);
             e.Property(x => x.Label).HasMaxLength(200).IsRequired();
-            // TotalAmount is computed in-memory from Lines, not stored
-            e.HasOne(x => x.Budget).WithMany().HasForeignKey(x => x.BudgetId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Project).WithMany(p => p.ReceiptBatches).HasForeignKey(x => x.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.BatchCategoryId).OnDelete(DeleteBehavior.Restrict);
-            e.HasMany(x => x.Lines).WithOne(l => l.Batch).HasForeignKey(l => l.BatchId).OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(x => x.Budget)
+                .WithMany()
+                .HasForeignKey(x => x.BudgetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ÄNDRA DENNA RAD: Från SetNull till Restrict
+            e.HasOne(x => x.Project)
+                .WithMany(p => p.ReceiptBatches)
+                .HasForeignKey(x => x.ProjectId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict); // <--- Ändrad här
+
+            e.HasOne(x => x.Category)
+                .WithMany()
+                .HasForeignKey(x => x.BatchCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasMany(x => x.Lines)
+                .WithOne(l => l.Batch)
+                .HasForeignKey(l => l.BatchId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<ReceiptLine>(e => {
@@ -108,7 +151,14 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Amount).HasColumnType("decimal(18,2)");
             e.Property(x => x.ReferenceCode).HasMaxLength(20);
             e.Property(x => x.Currency).HasMaxLength(3);
-            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+
+            // ÄNDRA HÄR: Från SetNull till Restrict
+            e.HasOne(x => x.LinkedTransaction)
+                .WithMany()
+                .HasForeignKey(x => x.LinkedTransactionId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict); // <--- Fixen här
+
             e.HasIndex(x => new { x.BatchId, x.SequenceNumber }).IsUnique();
         });
 
