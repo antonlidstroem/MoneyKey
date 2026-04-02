@@ -6,6 +6,7 @@
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @using BudgetPlanner.Blazor.Components.Shared
+@using Microsoft.AspNetCore.Components.Authorization
 
 <div class="app-shell">
     <aside class="sidebar">
@@ -13,9 +14,16 @@
 
         <div class="budget-switcher">
             <select @onchange="OnBudgetChanged" value="@BudgetState.ActiveBudgetId">
-                @foreach (var b in BudgetState.MyBudgets)
+                @if (BudgetState.MyBudgets == null || !BudgetState.MyBudgets.Any())
                 {
-                    <option value="@b.Id">@b.Name</option>
+                    <option disabled selected>Inga budgetar...</option>
+                }
+                else
+                {
+                    @foreach (var b in BudgetState.MyBudgets)
+                    {
+                        <option value="@b.Id">@b.Name</option>
+                    }
                 }
             </select>
         </div>
@@ -59,33 +67,61 @@
             <div class="user-chip">
                 <div class="user-avatar">@Initials</div>
                 <div>
-                    <div class="user-name">@(AuthSvc.CurrentUser?.Email ?? "")</div>
+                    <div class="user-name">@(AuthSvc.CurrentUser?.Email ?? "Gäst")</div>
                     <button class="btn btn-ghost btn-sm" @onclick="LogoutAsync">Logga ut</button>
                 </div>
             </div>
         </div>
     </aside>
 
-    <div class="main-area">@Body</div>
+    <div class="main-area">
+        @Body
+    </div>
 </div>
 
 <ToastContainer />
 
 @code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
     private string Initials => AuthSvc.CurrentUser is { } u
-        ? $"{u.FirstName.FirstOrDefault()}{u.LastName.FirstOrDefault()}".ToUpper() : "?";
+        ? $"{u.FirstName?.FirstOrDefault()}{u.LastName?.FirstOrDefault()}".ToUpper()
+        : "?";
 
     protected override async Task OnInitializedAsync()
     {
-        var budgets = await BudgetSvc.GetMyBudgetsAsync();
-        if (budgets != null) BudgetState.SetBudgets(budgets);
-
-        if (!string.IsNullOrEmpty(Services.JwtAuthenticationStateProvider.AccessToken))
+        if (AuthStateTask != null)
         {
-            var apiBase = Config["ApiBaseUrl"] ?? "https://localhost:7000";
-            await SignalR.ConnectAsync(apiBase,
-                Services.JwtAuthenticationStateProvider.AccessToken!,
-                BudgetState.ActiveBudgetId);
+            var authState = await AuthStateTask;
+            var user = authState.User;
+
+            // Kör endast API-anrop om användaren faktiskt är inloggad
+            if (user.Identity is not null && user.Identity.IsAuthenticated)
+            {
+                try
+                {
+                    // 1. Hämta budgetar
+                    var budgets = await BudgetSvc.GetMyBudgetsAsync();
+                    if (budgets != null)
+                    {
+                        BudgetState.SetBudgets(budgets);
+                    }
+
+                    // 2. Koppla upp SignalR om vi har en token
+                    var token = Services.JwtAuthenticationStateProvider.AccessToken;
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                        var apiBase = Config["ApiBaseUrl"] ?? "https://localhost:7000";
+                        await SignalR.ConnectAsync(apiBase, token, BudgetState.ActiveBudgetId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Logga fel men låt appen leva vidare
+                    Console.WriteLine($"Fel vid initiering av MainLayout: {ex.Message}");
+                }
+            }
         }
     }
 
@@ -94,9 +130,18 @@
         if (int.TryParse(e.Value?.ToString(), out var id))
         {
             var b = BudgetState.MyBudgets.FirstOrDefault(x => x.Id == id);
-            if (b != null) { BudgetState.SetActiveBudget(b); await SignalR.SwitchBudgetAsync(id); Nav.NavigateTo("/"); }
+            if (b != null)
+            {
+                BudgetState.SetActiveBudget(b);
+                await SignalR.SwitchBudgetAsync(id);
+                Nav.NavigateTo("/");
+            }
         }
     }
 
-    private async Task LogoutAsync() { await AuthSvc.LogoutAsync(); Nav.NavigateTo("/login"); }
+    private async Task LogoutAsync()
+    {
+        await AuthSvc.LogoutAsync();
+        Nav.NavigateTo("/login");
+    }
 }

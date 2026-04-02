@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using BudgetPlanner.Blazor.Services;
 using BudgetPlanner.Blazor.State;
 using Microsoft.AspNetCore.Components.Web;
+using System.Net.Http;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<BudgetPlanner.Blazor.App>("#app");
@@ -20,12 +21,19 @@ builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
 
 builder.Services.AddTransient<AuthorizationMessageHandler>(); // Använd Transient här
 
-builder.Services.AddScoped(sp =>
+// 1. Registrera din handler som vanligt
+builder.Services.AddTransient<AuthorizationMessageHandler>();
+
+// 2. Använd AddHttpClient för att konfigurera klienten korrekt
+builder.Services.AddHttpClient("BudgetAPI", client =>
 {
-    var handler = sp.GetRequiredService<AuthorizationMessageHandler>();
-    // VIKTIGT: Skicka med handler i konstruktorn, men rör inte InnerHandler manuellt i klassen
-    return new HttpClient(handler) { BaseAddress = new Uri(apiBase) };
-});
+    client.BaseAddress = new Uri(apiBase);
+})
+.AddHttpMessageHandler<AuthorizationMessageHandler>(); // Detta länkar ihop dem på rätt sätt
+
+// 3. Gör den till "standard-klient" så att dina andra tjänster kan använda den
+builder.Services.AddScoped(sp =>
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient("BudgetAPI"));
 
 builder.Services.AddAuthorizationCore();
 
