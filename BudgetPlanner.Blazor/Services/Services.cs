@@ -8,7 +8,8 @@ using BudgetPlanner.Core.DTOs;
 using BudgetPlanner.Core.Services;
 using BudgetPlanner.DAL.Repositories;
 using BudgetPlanner.Domain.Enums;
-using BudgetPlanner.Domain.Models; // SAKNADES TIDIGARE
+using BudgetPlanner.Domain.Models;
+using Microsoft.Extensions.Configuration;
 
 namespace BudgetPlanner.Blazor.Services;
 
@@ -16,9 +17,15 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
     private static string? _accessToken;
     private static UserDto? _currentUser;
-    private readonly HttpClient _http;
 
-    public JwtAuthenticationStateProvider(HttpClient http) => _http = http;
+    // Vi skapar en dedikerad HttpClient för just auth-anrop för att bryta cirkeln i DI
+    private readonly HttpClient _authClient;
+
+    public JwtAuthenticationStateProvider(IConfiguration config)
+    {
+        var apiBase = config["ApiBaseUrl"] ?? "https://localhost:7000";
+        _authClient = new HttpClient { BaseAddress = new Uri(apiBase) };
+    }
 
     public static string? AccessToken => _accessToken;
     public static UserDto? CurrentUser => _currentUser;
@@ -30,7 +37,8 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
         try
         {
-            var r = await _http.PostAsync("api/auth/refresh", null);
+            // Vi använder _authClient (utan handler) för att undvika cirkulära beroenden
+            var r = await _authClient.PostAsync("api/auth/refresh", null);
             if (r.IsSuccessStatusCode)
             {
                 var result = await r.Content.ReadFromJsonAsync<AuthResultDto>();
@@ -57,10 +65,14 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
     private static AuthenticationState Build(string token)
     {
-        var handler = new JwtSecurityTokenHandler();
-        var jwt = handler.ReadJwtToken(token);
-        var id = new ClaimsIdentity(jwt.Claims, "jwt");
-        return new AuthenticationState(new ClaimsPrincipal(id));
+        try
+        {
+            var handler = new JwtSecurityTokenHandler();
+            var jwt = handler.ReadJwtToken(token);
+            var id = new ClaimsIdentity(jwt.Claims, "jwt");
+            return new AuthenticationState(new ClaimsPrincipal(id));
+        }
+        catch { return Anonymous(); }
     }
 
     private static AuthenticationState Anonymous() =>
@@ -68,20 +80,23 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
     private static bool IsExpired(string token)
     {
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
-        return jwt.ValidTo < DateTime.UtcNow.AddSeconds(-30);
+        try
+        {
+            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+            return jwt.ValidTo < DateTime.UtcNow.AddSeconds(-30);
+        }
+        catch { return true; }
     }
 }
 
 public class AuthorizationMessageHandler : DelegatingHandler
 {
-    private readonly JwtAuthenticationStateProvider _auth;
+    private readonly IServiceProvider _serviceProvider;
     private bool _refreshing;
 
-    public AuthorizationMessageHandler(JwtAuthenticationStateProvider auth)
+    public AuthorizationMessageHandler(IServiceProvider serviceProvider)
     {
-        _auth = auth;
-        InnerHandler = new HttpClientHandler();
+        _serviceProvider = serviceProvider;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -93,26 +108,26 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
         var response = await base.SendAsync(request, ct);
 
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !_refreshing)
+        // Skydd: Försök inte refresha om det redan är ett auth-anrop som misslyckas
+        var isAuthRequest = request.RequestUri?.AbsolutePath.Contains("/api/auth/") ?? false;
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !isAuthRequest && !_refreshing)
         {
             _refreshing = true;
             try
             {
-                using var refreshClient = new HttpClient(new HttpClientHandler())
-                { BaseAddress = new Uri(request.RequestUri!.GetLeftPart(UriPartial.Authority)) };
-                var rr = await refreshClient.PostAsync("api/auth/refresh", null, ct);
-                if (rr.IsSuccessStatusCode)
+                // Hämta providern lazily för att undvika cirkulär DI vid uppstart
+                var authProvider = (JwtAuthenticationStateProvider)_serviceProvider
+                    .GetRequiredService<AuthenticationStateProvider>();
+
+                await authProvider.GetAuthenticationStateAsync();
+
+                if (!string.IsNullOrEmpty(JwtAuthenticationStateProvider.AccessToken))
                 {
-                    var result = await rr.Content.ReadFromJsonAsync<AuthResultDto>(cancellationToken: ct);
-                    if (result != null)
-                    {
-                        _auth.SetToken(result.AccessToken, result.User);
-                        request.Headers.Authorization =
-                            new AuthenticationHeaderValue("Bearer", result.AccessToken);
-                        response = await base.SendAsync(request, ct);
-                    }
+                    request.Headers.Authorization =
+                        new AuthenticationHeaderValue("Bearer", JwtAuthenticationStateProvider.AccessToken);
+                    response = await base.SendAsync(request, ct);
                 }
-                else { _auth.ClearToken(); }
             }
             finally { _refreshing = false; }
         }
@@ -292,7 +307,7 @@ public class ReceiptApiService : ApiServiceBase
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}");
 
     public Task<ReceiptLineDto?> AddLineAsync(int budgetId, int batchId, CreateReceiptLineDto dto) =>
-        PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
+    PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
 
     public async Task DeleteLineAsync(int budgetId, int batchId, int lineId) =>
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}/lines/{lineId}");

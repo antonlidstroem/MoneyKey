@@ -17,10 +17,13 @@ var apiBase = builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7000";
 builder.Services.AddScoped<JwtAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
     sp.GetRequiredService<JwtAuthenticationStateProvider>());
-builder.Services.AddScoped<AuthorizationMessageHandler>();
+
+builder.Services.AddTransient<AuthorizationMessageHandler>(); // Använd Transient här
+
 builder.Services.AddScoped(sp =>
 {
     var handler = sp.GetRequiredService<AuthorizationMessageHandler>();
+    // VIKTIGT: Skicka med handler i konstruktorn, men rör inte InnerHandler manuellt i klassen
     return new HttpClient(handler) { BaseAddress = new Uri(apiBase) };
 });
 

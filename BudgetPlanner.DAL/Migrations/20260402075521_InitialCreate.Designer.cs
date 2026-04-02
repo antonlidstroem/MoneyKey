@@ -4,6 +4,7 @@ using BudgetPlanner.DAL.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BudgetPlanner.DAL.Migrations
 {
     [DbContext(typeof(BudgetDbContext))]
-    partial class BudgetDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260402075521_InitialCreate")]
+    partial class InitialCreate
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -99,28 +102,6 @@ namespace BudgetPlanner.DAL.Migrations
                         .HasFilter("[NormalizedUserName] IS NOT NULL");
 
                     b.ToTable("AspNetUsers", (string)null);
-
-                    b.HasData(
-                        new
-                        {
-                            Id = "admin-uuid-123",
-                            AccessFailedCount = 0,
-                            ConcurrencyStamp = "1fa6e922-e0ff-4ee1-89dd-32cbde78b9fe",
-                            CreatedAt = new DateTime(2026, 4, 2, 8, 38, 41, 198, DateTimeKind.Utc).AddTicks(1193),
-                            Email = "admin@budget.se",
-                            EmailConfirmed = true,
-                            FirstName = "Admin",
-                            LastName = "Budgetsson",
-                            LockoutEnabled = false,
-                            NormalizedEmail = "ADMIN@BUDGET.SE",
-                            NormalizedUserName = "ADMIN@BUDGET.SE",
-                            PasswordHash = "AQAAAAIAAYagAAAAEIO/H45xTL+VJmplGyhwXyTJ1mkFirmVVqty3NhQGqvCgROmF18WKKKxa8MEjhTP/Q==",
-                            PhoneNumberConfirmed = false,
-                            PreferredCulture = "sv-SE",
-                            SecurityStamp = "dadc6806-19f7-4949-9ea7-f3677e1a30f5",
-                            TwoFactorEnabled = false,
-                            UserName = "admin@budget.se"
-                        });
                 });
 
             modelBuilder.Entity("BudgetPlanner.Domain.Models.AppSetting", b =>

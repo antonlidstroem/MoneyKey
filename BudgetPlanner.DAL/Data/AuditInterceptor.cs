@@ -32,48 +32,70 @@ public class AuditInterceptor : SaveChangesInterceptor
     private void AddAuditEntries(DbContext? ctx)
     {
         if (ctx == null) return;
-        foreach (var entry in ctx.ChangeTracker.Entries())
+
+        // 1. VIKTIGT: Materialisera samlingen med .ToList() för att undvika 
+        // "Collection was modified"-felet när vi lägger till AuditLogs i samma context.
+        var entries = ctx.ChangeTracker.Entries().ToList();
+
+        foreach (var entry in entries)
         {
+            // Hoppa över om entiteten inte ska loggas eller om inga ändringar skett
             if (!IsAuditable(entry.Entity)) continue;
             if (entry.State is EntityState.Unchanged or EntityState.Detached) continue;
 
+            // Bestäm handling
             var action = entry.State switch
             {
-                EntityState.Added    => AuditAction.Created,
+                EntityState.Added => AuditAction.Created,
                 EntityState.Modified => AuditAction.Updated,
-                EntityState.Deleted  => AuditAction.Deleted,
-                _                    => AuditAction.Updated
+                EntityState.Deleted => AuditAction.Deleted,
+                _ => AuditAction.Updated
             };
 
+            // Hämta BudgetId
             var budgetId = GetBudgetId(entry.Entity);
-            if (budgetId == 0) continue;
 
+            // Specialhantering: Om vi skapar en HELT NY budget är budgetId 0 just nu.
+            // Vi tillåter detta så att själva budget-skapandet loggas.
+            if (budgetId == 0 && entry.Entity is not DomainModels.Budget) continue;
+
+            // Serialisera värden
             string? oldVals = null, newVals = null;
+
             if (entry.State == EntityState.Modified)
             {
-                oldVals = JsonSerializer.Serialize(entry.Properties.Where(p => p.IsModified).ToDictionary(p => p.Metadata.Name, p => p.OriginalValue));
-                newVals = JsonSerializer.Serialize(entry.Properties.Where(p => p.IsModified).ToDictionary(p => p.Metadata.Name, p => p.CurrentValue));
+                var modifiedProps = entry.Properties.Where(p => p.IsModified).ToDictionary(p => p.Metadata.Name, p => p.OriginalValue);
+                var currentProps = entry.Properties.Where(p => p.IsModified).ToDictionary(p => p.Metadata.Name, p => p.CurrentValue);
+
+                oldVals = JsonSerializer.Serialize(modifiedProps);
+                newVals = JsonSerializer.Serialize(currentProps);
             }
             else if (entry.State == EntityState.Added)
+            {
                 newVals = JsonSerializer.Serialize(entry.Properties.ToDictionary(p => p.Metadata.Name, p => p.CurrentValue));
-            else
-                oldVals = JsonSerializer.Serialize(entry.Properties.ToDictionary(p => p.Metadata.Name, p => p.CurrentValue));
+            }
+            else // Deleted
+            {
+                oldVals = JsonSerializer.Serialize(entry.Properties.ToDictionary(p => p.Metadata.Name, p => p.OriginalValue));
+            }
 
+            // Försök hämta primärnyckel (för nya entiteter kan denna vara 0 fram till Save)
             var key = entry.Metadata.FindPrimaryKey()?.Properties
                 .Select(p => entry.Property(p.Name).CurrentValue?.ToString())
                 .FirstOrDefault() ?? "0";
 
+            // Lägg till i loggen
             ctx.Set<DomainModels.AuditLog>().Add(new DomainModels.AuditLog
             {
-                BudgetId   = budgetId,
-                UserId     = _user.UserId,
-                UserEmail  = _user.UserEmail,
+                BudgetId = budgetId,
+                UserId = _user.UserId,
+                UserEmail = _user.UserEmail,
                 EntityName = entry.Entity.GetType().Name,
-                EntityId   = key,
-                Action     = action,
-                OldValues  = oldVals,
-                NewValues  = newVals,
-                Timestamp  = DateTime.UtcNow
+                EntityId = key,
+                Action = action,
+                OldValues = oldVals,
+                NewValues = newVals,
+                Timestamp = DateTime.UtcNow
             });
         }
     }

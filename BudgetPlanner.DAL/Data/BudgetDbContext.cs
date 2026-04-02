@@ -1,8 +1,9 @@
+using BudgetPlanner.DAL.Models;
+using BudgetPlanner.Domain.Enums;
+using BudgetPlanner.Domain.Models;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using BudgetPlanner.DAL.Models;
-using BudgetPlanner.Domain.Models;
-using BudgetPlanner.Domain.Enums;
 
 namespace BudgetPlanner.DAL.Data;
 
@@ -206,5 +207,27 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             new ReceiptBatchCategory { Id = 6, Name = "Tjänster & Konsulting",  IconName = "handshake",      SortOrder = 6, Description = "Externa tjänster, prenumerationer" },
             new ReceiptBatchCategory { Id = 7, Name = "Övrigt",                 IconName = "more_horiz",     SortOrder = 7, Description = "Utlägg som inte passar annan kategori" }
         );
+
+
+        // I BudgetDbContext.cs -> OnModelCreating
+        var hasher = new PasswordHasher<ApplicationUser>();
+        var adminUser = new ApplicationUser
+        {
+            Id = "admin-uuid-123", // Ge den ett statiskt ID
+            UserName = "admin@budget.se",
+            NormalizedUserName = "ADMIN@BUDGET.SE",
+            Email = "admin@budget.se",
+            NormalizedEmail = "ADMIN@BUDGET.SE",
+            EmailConfirmed = true,
+            FirstName = "Admin",
+            LastName = "Budgetsson",
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
+
+        adminUser.PasswordHash = hasher.HashPassword(adminUser, "Nygatan12!");
+
+        mb.Entity<ApplicationUser>().HasData(adminUser);
+
+
     }
 }
