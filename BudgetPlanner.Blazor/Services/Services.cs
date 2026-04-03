@@ -254,6 +254,8 @@ public class BudgetService : ApiServiceBase
         var r = await Http.PutAsJsonAsync($"api/budgets/{budgetId}", dto);
         r.EnsureSuccessStatusCode();
     }
+
+
 }
 
 public class ProjectService : ApiServiceBase
@@ -349,10 +351,10 @@ public class ReceiptApiService : ApiServiceBase
 
     // FIX: accepts optional status filter passed server-side + configurable page size
     public Task<PagedResult<ReceiptBatchDto>?> GetAllAsync(
-        int budgetId,
-        int page = 1,
-        int pageSize = 25,
-        ReceiptBatchStatus? status = null)
+    int budgetId,
+    int page = 1,
+    int pageSize = 25,
+    ReceiptBatchStatus? status = null)
     {
         var url = $"api/budgets/{budgetId}/receipts?page={page}&pageSize={pageSize}";
         if (status.HasValue) url += $"&statuses={(int)status.Value}";

@@ -9,6 +9,8 @@ using BudgetPlanner.Core.DTOs;
 using BudgetPlanner.DAL.Repositories;
 using BudgetPlanner.Domain.Models;
 using BudgetPlanner.Domain.Enums;
+using Microsoft.Extensions.Caching.Memory;
+
 
 namespace BudgetPlanner.Core.Services;
 
@@ -42,7 +44,10 @@ public class MilersattningService
     private readonly ITransactionRepository _txRepo;
     private readonly IAppSettingRepository _settings;
 
-    public MilersattningService(IMilersattningRepository repo, ITransactionRepository txRepo, IAppSettingRepository settings)
+    public MilersattningService(
+        IMilersattningRepository repo,
+        ITransactionRepository txRepo,
+        IAppSettingRepository settings)
     { _repo = repo; _txRepo = txRepo; _settings = settings; }
 
     public async Task<MilersattningEntry> CreateAsync(int budgetId, string userId, CreateMilersattningDto dto)
@@ -67,7 +72,8 @@ public class MilersattningService
             StartDate = dto.TripDate,
             NetAmount = entry.ReimbursementAmount,
             Description = $"Milersättning: {dto.FromLocation} → {dto.ToLocation} ({dto.DistanceKm} km)",
-            CategoryId = 12,
+            // FIX: named constant replaces magic number 12
+            CategoryId = CategoryConstants.Milersattning,
             Type = TransactionType.Income,
             Recurrence = Recurrence.OneTime,
             IsActive = true,
@@ -94,6 +100,7 @@ public class MilersattningService
         return decimal.TryParse(stored, out var r) ? r : 0.25m;
     }
 }
+
 
 public class VabService
 {
@@ -126,7 +133,8 @@ public class VabService
             Description = string.IsNullOrWhiteSpace(dto.ChildName)
                 ? $"VAB {dto.StartDate:d}–{dto.EndDate:d} ({entry.TotalDays} dagar)"
                 : $"VAB {dto.ChildName}: {dto.StartDate:d}–{dto.EndDate:d} ({entry.TotalDays} dagar)",
-            CategoryId = 11,
+            // FIX: named constant replaces magic number 11
+            CategoryId = CategoryConstants.VabSjukfranvaro,
             Type = TransactionType.Expense,
             Recurrence = Recurrence.OneTime,
             IsActive = true,
@@ -147,7 +155,6 @@ public class VabService
         await _repo.DeleteAsync(id, budgetId);
     }
 }
-
 public class ReceiptService
 {
     private readonly IReceiptRepository _repo;
@@ -258,7 +265,7 @@ public class ReceiptService
                 StartDate = line.Date,
                 NetAmount = -Math.Abs(line.Amount),
                 Description = $"Utlägg [{line.ReferenceCode}]{(line.Vendor != null ? $": {line.Vendor}" : "")}",
-                CategoryId = 3,
+                CategoryId = CategoryConstants.Transport,
                 Type = TransactionType.Expense,
                 Recurrence = Recurrence.OneTime,
                 IsActive = true,
@@ -447,10 +454,9 @@ public class JournalQueryService
             BudgetId = q.BudgetId,
             Page = 1,
             PageSize = int.MaxValue,
-            FilterByStartDate = q.FilterByStartDate,
-            StartDate = q.StartDate,
-            FilterByEndDate = q.FilterByEndDate,
-            EndDate = q.EndDate,
+            // FIX: date filtering is handled uniformly by ApplySharedFilters
+            // for all entry types. Do NOT pre-filter by date here — it would
+            // filter transactions differently from milersattning/vab.
             FilterByCategory = q.FilterByCategory,
             CategoryId = q.CategoryId,
             ProjectId = q.FilterByProject ? q.ProjectId : null
@@ -753,40 +759,6 @@ public class SebProfile : BankCsvProfile { public override string BankName => "S
 public class SwedbankProfile : BankCsvProfile { public override string BankName => "Swedbank"; public override char Delimiter => ';'; public override int SkipRows => 4; public override string DateColumn => "Datum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Text"; public override string DateFormat => "yyyy-MM-dd"; }
 public class HandelsbankenProfile : BankCsvProfile { public override string BankName => "Handelsbanken"; public override char Delimiter => '\t'; public override int SkipRows => 1; public override string DateColumn => "Transaktionsdatum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Transaktionstext"; public override string DateFormat => "dd/MM/yyyy"; }
 
-public class ImportService
-{
-    private readonly ITransactionRepository _txRepo;
-    private static readonly Dictionary<string, List<ImportRowDto>> _sessions = new();
-
-    public ImportService(ITransactionRepository txRepo) => _txRepo = txRepo;
-
-    public static List<BankCsvProfile> GetProfiles() => new() { new SebProfile(), new SwedbankProfile(), new HandelsbankenProfile() };
-
-    public async Task<ImportSessionDto> PreviewAsync(Stream fileStream, string bankProfile, int budgetId)
-    {
-        var profile = GetProfiles().FirstOrDefault(p => p.BankName == bankProfile) ?? new SebProfile();
-        var rows = ParseCsv(fileStream, profile);
-        var existing = await _txRepo.GetForExportAsync(new TransactionQuery
-        {
-            BudgetId = budgetId,
-            FilterByStartDate = true,
-            StartDate = rows.Any() ? rows.Min(r => r.Date).AddDays(-1) : DateTime.Today.AddMonths(-6)
-        });
-
-        foreach (var row in rows)
-        {
-            row.IsDuplicate = existing.Any(t =>
-                t.StartDate.Date == row.Date.Date &&
-                Math.Abs(t.NetAmount - row.Amount) < 0.01m &&
-                string.Equals(t.Description?.Trim(), row.Description?.Trim(), StringComparison.OrdinalIgnoreCase));
-            row.SuggestedCategoryId = SuggestCategory(row.Description);
-            row.SuggestedCategoryName = GetCategoryName(row.SuggestedCategoryId);
-        }
-
-        var sessionId = Guid.NewGuid().ToString("N");
-        _sessions[sessionId] = rows;
-        return new ImportSessionDto(sessionId, new ImportPreviewDto { Rows = rows, TotalRows = rows.Count, DuplicateCount = rows.Count(r => r.IsDuplicate) });
-    }
 
     public async Task<int> ConfirmAsync(ConfirmImportDto dto, int budgetId, string userId)
     {
