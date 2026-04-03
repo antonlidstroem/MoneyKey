@@ -400,7 +400,7 @@ public class JournalQueryService
         IVabRepository vabRepo, IReceiptRepository receiptRepo)
     { _txRepo = txRepo; _miRepo = miRepo; _vabRepo = vabRepo; _receiptRepo = receiptRepo; }
 
-    public async Task<(List<JournalEntryDto> Items, int TotalCount)> QueryAsync(JournalQuery q)
+    public async Task<(List<JournalEntryDto> Items, int TotalCount, SummaryDto Summary)> QueryAsync(JournalQuery q)
     {
         var include = q.IncludeTypes.Any()
             ? q.IncludeTypes.ToHashSet()
@@ -429,7 +429,14 @@ public class JournalQueryService
         };
 
         var total = all.Count;
-        return (all.Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).ToList(), total);
+
+        // FIX: compute summary on ALL filtered items, BEFORE pagination.
+        // Previously the controller called ComputeSummary on the paged slice,
+        // so summary totals only reflected the current page.
+        var summary = ComputeSummary(all);
+
+        var page = all.Skip((q.Page - 1) * q.PageSize).Take(q.PageSize).ToList();
+        return (page, total, summary);
     }
 
     public SummaryDto ComputeSummary(List<JournalEntryDto> entries)

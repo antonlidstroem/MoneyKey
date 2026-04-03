@@ -1,5 +1,6 @@
 @page "/dashboard"
 @attribute [Authorize]
+@implements IDisposable
 @inject ReportsApiService ReportsSvc
 @inject BudgetState BudgetState
 @inject IJSRuntime JS
@@ -19,6 +20,13 @@
     @if (_loading)
     {
         <div style="text-align:center;padding:60px"><div class="spinner"></div></div>
+    }
+    else if (_loadError != null)
+    {
+        <div style="text-align:center;padding:60px;color:var(--color-muted)">
+            <span class="material-icons" style="font-size:2rem;display:block;margin-bottom:8px">error_outline</span>
+            @_loadError
+        </div>
     }
     else
     {
@@ -41,37 +49,73 @@
 </div>
 
 @code {
-    private int _year = DateTime.Today.Year;
-    private bool _loading = true;
+    private int     _year      = DateTime.Today.Year;
+    private bool    _loading   = true;
+    private string? _loadError;
     private decimal _totalIncome, _totalExpense;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        // FIX: subscribe to budget state changes so the dashboard reloads
+        // when MainLayout finishes setting up budgets after login.
+        BudgetState.StateChanged += OnStateChanged;
+
+        if (BudgetState.ActiveBudgetId > 0)
+            await LoadAsync();
+        else
+            _loading = false;
+    }
+
+    // FIX: fire-and-forget wrapper — safe for event callbacks.
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        try   { await LoadAsync(); }
+        catch { /* errors surfaced via _loadError */ }
+        StateHasChanged();
+    });
 
     private async Task LoadAsync()
     {
-
+        // FIX: guard — do nothing until a budget is active.
         if (BudgetState.ActiveBudgetId <= 0) return;
 
-        _loading = true;
-        var summary = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
-        var breakdown = await ReportsSvc.GetCategoryBreakdownAsync(BudgetState.ActiveBudgetId, new DateTime(_year, 1, 1), new DateTime(_year, 12, 31));
-        _loading = false;
+        _loading   = true;
+        _loadError = null;
+        StateHasChanged();
 
-        if (summary != null)
+        try
         {
-            _totalIncome  = summary.Rows.Sum(r => r.Income);
-            _totalExpense = summary.Rows.Sum(r => r.Expenses);
-            var months = summary.Rows.Select(r => $"{r.Year}-{r.Month:D2}").ToArray();
-            var inc    = summary.Rows.Select(r => (double)r.Income).ToArray();
-            var exp    = summary.Rows.Select(r => (double)Math.Abs(r.Expenses)).ToArray();
-            await JS.InvokeVoidAsync("renderBarChart", "monthly-chart", months, inc, exp);
+            var summary   = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
+            var breakdown = await ReportsSvc.GetCategoryBreakdownAsync(
+                                BudgetState.ActiveBudgetId,
+                                new DateTime(_year, 1, 1),
+                                new DateTime(_year, 12, 31));
+            _loading = false;
+            StateHasChanged();
+
+            if (summary != null)
+            {
+                _totalIncome  = summary.Rows.Sum(r => r.Income);
+                _totalExpense = summary.Rows.Sum(r => r.Expenses);
+                var months = summary.Rows.Select(r => $"{r.Year}-{r.Month:D2}").ToArray();
+                var inc    = summary.Rows.Select(r => (double)r.Income).ToArray();
+                var exp    = summary.Rows.Select(r => (double)Math.Abs(r.Expenses)).ToArray();
+                await JS.InvokeVoidAsync("renderBarChart", "monthly-chart", months, inc, exp);
+            }
+
+            if (breakdown != null)
+            {
+                var cats = breakdown.Select(x => x.Category).ToArray();
+                var vals = breakdown.Select(x => (double)x.Total).ToArray();
+                await JS.InvokeVoidAsync("renderDonutChart", "category-chart", cats, vals);
+            }
         }
-
-        if (breakdown != null)
+        catch (Exception ex)
         {
-            var cats = breakdown.Select(x => x.Category).ToArray();
-            var vals = breakdown.Select(x => (double)x.Total).ToArray();
-            await JS.InvokeVoidAsync("renderDonutChart", "category-chart", cats, vals);
+            _loadError = $"Kunde inte ladda dashboard: {ex.Message}";
+            _loading   = false;
         }
     }
+
+    public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
 }

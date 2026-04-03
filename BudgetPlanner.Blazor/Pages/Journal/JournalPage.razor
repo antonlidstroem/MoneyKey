@@ -91,6 +91,15 @@
                     {
                         <div style="padding:40px;text-align:center"><div class="spinner"></div></div>
                     }
+                    else if (_loadError != null)
+                    {
+                        <div style="padding:40px;text-align:center;color:var(--color-expense)">
+                            <span class="material-icons" style="display:block;font-size:2rem;margin-bottom:8px">error_outline</span>
+                            @_loadError
+                            <br/>
+                            <button class="btn btn-secondary btn-sm" style="margin-top:12px" @onclick="LoadAsync">Försök igen</button>
+                        </div>
+                    }
                     else
                     {
                         <table style="width:100%;border-collapse:collapse" class="quickgrid">
@@ -108,6 +117,14 @@
                                 </tr>
                             </thead>
                             <tbody>
+                                @if (!_entries.Any())
+                                {
+                                    <tr>
+                                        <td colspan="9" style="text-align:center;padding:32px;color:var(--color-muted)">
+                                            Inga poster hittades.
+                                        </td>
+                                    </tr>
+                                }
                                 @foreach (var entry in _entries)
                                 {
                                     var e = entry;
@@ -236,35 +253,66 @@
     private HashSet<string>       _expanded    = new();
     private TransactionDto?       _editTx;
     private ConfirmDialog?        _confirm;
-    private string _qs        = "";
-    private bool   _loading, _showForm, _selectAll;
-    private int    _totalCount, _totalPages;
-
-    // FIX: track which row is loading to show inline spinner
-    private int _editingId = -1;
+    private string  _qs        = "";
+    private string? _loadError;
+    private bool    _loading, _showForm, _selectAll;
+    private int     _totalCount, _totalPages;
+    private int     _editingId = -1;
 
     protected override async Task OnInitializedAsync()
     {
-        var p = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId);
-        _projects = p ?? new();
-        Filter.FilterChanged    += OnFilterChanged;
+        // FIX: Register event handlers FIRST — before any async operations.
+        // If MainLayout finishes loading budgets while we are awaiting a
+        // project fetch, StateChanged fires. If we haven't subscribed yet
+        // we miss the event and the page stays blank forever.
+        Filter.FilterChanged     += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
-        SignalR.OnBudgetEvent   += OnSR;
-        await LoadAsync();
+        SignalR.OnBudgetEvent    += OnSR;
+
+        // Only fetch data if a budget is already active (MainLayout may have
+        // resolved before us). If ActiveBudgetId is 0, we wait for the
+        // StateChanged event (fired by BudgetState.SetBudgets in MainLayout).
+        if (BudgetState.ActiveBudgetId > 0)
+        {
+            await LoadProjectsAsync();
+            await LoadAsync();
+        }
     }
 
-    // FIX: async void replaced with safe fire-and-forget that surfaces exceptions via Toast.
+    // FIX: Extracted helper so OnStateChanged can also reload projects when
+    // the user switches budgets (different budget → different project list).
+    private async Task LoadProjectsAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        try
+        {
+            var p = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId);
+            _projects = p ?? new();
+        }
+        catch
+        {
+            // Non-fatal — project filter/form just shows empty list.
+            _projects = new();
+        }
+    }
+
+    // FIX: async void replaced with InvokeAsync wrapper; projects reloaded on
+    // budget change so the transaction form dropdown reflects the new budget.
     private void OnFilterChanged() => InvokeAsync(async () =>
     {
         try   { await LoadAsync(); }
-        catch (Exception ex) { Toast.Error($"Fel vid laddning: {ex.Message}"); }
+        catch (Exception ex) { Toast.Error($"Filtreringsfel: {ex.Message}"); }
         StateHasChanged();
     });
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        try   { await LoadAsync(); }
-        catch (Exception ex) { Toast.Error($"Fel vid laddning: {ex.Message}"); }
+        try
+        {
+            await LoadProjectsAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
         StateHasChanged();
     });
 
@@ -272,7 +320,9 @@
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
 
-        _loading = true; StateHasChanged();
+        _loading   = true;
+        _loadError = null;
+        StateHasChanged();
         try
         {
             var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
@@ -284,6 +334,13 @@
                 _summary    = r.Value.Summary;
             }
         }
+        catch (Exception ex)
+        {
+            // FIX: Surface the error rather than leaving the page in a
+            // permanent spinner. A retry button is shown in the table area.
+            _loadError = $"Kunde inte ladda journal: {ex.Message}";
+            Toast.Error(_loadError);
+        }
         finally { _loading = false; }
     }
 
@@ -291,15 +348,12 @@
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
         try   { await LoadAsync(); }
-        catch (Exception ex) { Toast.Error($"Realtime-uppdatering misslyckades: {ex.Message}"); }
+        catch (Exception ex) { Toast.Error($"Realtidsuppdatering misslyckades: {ex.Message}"); }
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnSaved(TransactionDto _) { await LoadAsync(); _showForm = false; }
 
-    // FIX: Load the full TransactionDto via API before opening the edit form.
-    //      Previously we built a partial DTO from JournalEntryDto which left
-    //      CategoryId=0, Type unset, Recurrence unset — causing corrupt saves.
     private async Task EditEntryAsync(JournalEntryDto entry)
     {
         _editingId = entry.SourceId;
@@ -381,8 +435,8 @@
 
     public void Dispose()
     {
-        Filter.FilterChanged    -= OnFilterChanged;
+        Filter.FilterChanged     -= OnFilterChanged;
         BudgetState.StateChanged -= OnStateChanged;
-        SignalR.OnBudgetEvent   -= OnSR;
+        SignalR.OnBudgetEvent    -= OnSR;
     }
 }

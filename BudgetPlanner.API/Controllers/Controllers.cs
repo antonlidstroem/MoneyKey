@@ -229,7 +229,23 @@ public class BudgetsController : BaseApiController
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         var b = await _repo.GetByIdAsync(budgetId);
-        return b == null ? NotFound() : Ok(b.Memberships);
+        if (b == null) return NotFound();
+
+        // FIX: project to a flat DTO — no navigation properties, no circular refs.
+        var result = b.Memberships
+            .Where(m => m.AcceptedAt != null)
+            .Select(m => new
+            {
+                m.Id,
+                m.BudgetId,
+                m.UserId,
+                m.Role,
+                m.AcceptedAt,
+                m.InvitedByUserId
+            })
+            .ToList();
+
+        return Ok(result);
     }
 
     [HttpPost("{budgetId:int}/invite")]
@@ -273,11 +289,20 @@ public class JournalController : BaseApiController
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         query.BudgetId = budgetId;
-        var (items, total) = await _journal.QueryAsync(query);
-        var summary = _journal.ComputeSummary(items);
+
+        // FIX: QueryAsync now returns a 3-tuple — summary is computed on all
+        // filtered items inside the service, before pagination is applied.
+        var (items, total, summary) = await _journal.QueryAsync(query);
+
         return Ok(new
         {
-            Result = new PagedResult<JournalEntryDto> { Items = items, TotalCount = total, Page = query.Page, PageSize = query.PageSize },
+            Result = new PagedResult<JournalEntryDto>
+            {
+                Items = items,
+                TotalCount = total,
+                Page = query.Page,
+                PageSize = query.PageSize
+            },
             Summary = summary
         });
     }
