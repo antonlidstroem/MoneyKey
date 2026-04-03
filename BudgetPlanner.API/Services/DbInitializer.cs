@@ -11,7 +11,7 @@ namespace BudgetPlanner.API.Services;
 /// Creates a first-run admin account when the database contains no users.
 /// Credentials come from AdminSetup config — NEVER hardcoded.
 /// </summary>
-public static class DbInitializer
+public class DbInitializer
 {
     public static async Task InitializeAsync(IServiceProvider services)
     {
