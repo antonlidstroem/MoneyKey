@@ -305,6 +305,8 @@ public class ImportRowDto
     public bool Selected { get; set; } = true;
     public int? SuggestedCategoryId { get; set; }
     public string? SuggestedCategoryName { get; set; }
+
+    public string? CategoryName { get; set; }
 }
 
 public record ConfirmImportDto(List<int> SelectedRowIndices, int DefaultCategoryId, string SessionId);

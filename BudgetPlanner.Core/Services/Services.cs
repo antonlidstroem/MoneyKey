@@ -759,10 +759,23 @@ public class SebProfile : BankCsvProfile { public override string BankName => "S
 public class SwedbankProfile : BankCsvProfile { public override string BankName => "Swedbank"; public override char Delimiter => ';'; public override int SkipRows => 4; public override string DateColumn => "Datum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Text"; public override string DateFormat => "yyyy-MM-dd"; }
 public class HandelsbankenProfile : BankCsvProfile { public override string BankName => "Handelsbanken"; public override char Delimiter => '\t'; public override int SkipRows => 1; public override string DateColumn => "Transaktionsdatum"; public override string AmountColumn => "Belopp"; public override string DescriptionColumn => "Transaktionstext"; public override string DateFormat => "dd/MM/yyyy"; }
 
+// --- HÄR BÖRJAR FIXEN ---
+public class BankImportService
+{
+    private readonly ITransactionRepository _txRepo;
+    private readonly IMemoryCache _sessions;
+
+    public BankImportService(ITransactionRepository txRepo, IMemoryCache sessions)
+    {
+        _txRepo = txRepo;
+        _sessions = sessions;
+    }
 
     public async Task<int> ConfirmAsync(ConfirmImportDto dto, int budgetId, string userId)
     {
-        if (!_sessions.TryGetValue(dto.SessionId, out var allRows))
+        // Förutsätter att _sessions är IMemoryCache. 
+        // Om det är en Dictionary, ändra deklarationen ovan.
+        if (!_sessions.TryGetValue(dto.SessionId, out List<ImportRowDto>? allRows) || allRows == null)
             throw new InvalidOperationException("Import-sessionen har gått ut. Ladda upp filen igen.");
 
         var selected = allRows.Where(r => dto.SelectedRowIndices.Contains(r.RowIndex)).ToList();
@@ -785,6 +798,17 @@ public class HandelsbankenProfile : BankCsvProfile { public override string Bank
         return selected.Count;
     }
 
+    public List<ImportRowDto> ProcessFile(Stream stream, BankCsvProfile profile)
+    {
+        var rows = ParseCsv(stream, profile);
+        foreach (var r in rows)
+        {
+            r.SuggestedCategoryId = SuggestCategory(r.Description);
+            r.CategoryName = GetCategoryName(r.SuggestedCategoryId);
+        }
+        return rows;
+    }
+
     private static List<ImportRowDto> ParseCsv(Stream stream, BankCsvProfile profile)
     {
         var rows = new List<ImportRowDto>();
@@ -795,8 +819,11 @@ public class HandelsbankenProfile : BankCsvProfile { public override string Bank
             BadDataFound = null,
             MissingFieldFound = null
         };
+
         using var reader = new StreamReader(stream);
+        // Skippa rader enligt profil
         for (var i = 0; i < profile.SkipRows - 1; i++) reader.ReadLine();
+
         using var csv = new CsvReader(reader, config);
         var idx = 0;
         while (csv.Read())
@@ -804,13 +831,16 @@ public class HandelsbankenProfile : BankCsvProfile { public override string Bank
             try
             {
                 var dateStr = csv.GetField(profile.DateColumn) ?? "";
-                var amountStr = (csv.GetField(profile.AmountColumn) ?? "").Replace(" ", "").Replace(",", ".").Replace("\u00a0", "");
+                var amountStr = (csv.GetField(profile.AmountColumn) ?? "")
+                    .Replace(" ", "").Replace(",", ".").Replace("\u00a0", "");
                 var desc = csv.GetField(profile.DescriptionColumn)?.Trim();
+
                 if (!DateTime.TryParseExact(dateStr, profile.DateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)) continue;
                 if (!decimal.TryParse(amountStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var amount)) continue;
+
                 rows.Add(new ImportRowDto { RowIndex = idx++, Date = date, Amount = amount, Description = desc, Selected = true });
             }
-            catch { }
+            catch { /* Logga fel vid behov */ }
         }
         return rows;
     }
@@ -827,5 +857,13 @@ public class HandelsbankenProfile : BankCsvProfile { public override string Bank
         return null;
     }
 
-    private static string? GetCategoryName(int? id) => id switch { 1 => "Mat", 2 => "Hus & drift", 3 => "Transport", 6 => "Streaming-tjänster", 8 => "Lön", _ => null };
+    private static string? GetCategoryName(int? id) => id switch
+    {
+        1 => "Mat",
+        2 => "Hus & drift",
+        3 => "Transport",
+        6 => "Streaming-tjänster",
+        8 => "Lön",
+        _ => null
+    };
 }
