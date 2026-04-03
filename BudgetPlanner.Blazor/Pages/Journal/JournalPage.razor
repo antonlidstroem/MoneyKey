@@ -270,6 +270,8 @@
 
     private async Task LoadAsync()
     {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+
         _loading = true; StateHasChanged();
         try
         {

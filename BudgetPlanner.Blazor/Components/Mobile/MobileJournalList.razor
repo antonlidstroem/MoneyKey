@@ -231,6 +231,8 @@
 
     private async Task LoadAsync(bool reset)
     {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+
         if (reset) { Filter.Query.Page = 1; _entries.Clear(); }
         _loading = true;
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
