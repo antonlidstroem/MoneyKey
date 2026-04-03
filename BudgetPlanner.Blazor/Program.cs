@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using BudgetPlanner.Blazor.Services;
 using BudgetPlanner.Blazor.State;
 using Microsoft.AspNetCore.Components.Web;
-using System.Net.Http;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<BudgetPlanner.Blazor.App>("#app");
@@ -19,19 +18,15 @@ builder.Services.AddScoped<JwtAuthenticationStateProvider>();
 builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
     sp.GetRequiredService<JwtAuthenticationStateProvider>());
 
-builder.Services.AddTransient<AuthorizationMessageHandler>(); // Använd Transient här
-
-// 1. Registrera din handler som vanligt
+// FIX: Single registration — removed duplicate AddTransient<AuthorizationMessageHandler>().
 builder.Services.AddTransient<AuthorizationMessageHandler>();
 
-// 2. Använd AddHttpClient för att konfigurera klienten korrekt
 builder.Services.AddHttpClient("BudgetAPI", client =>
 {
     client.BaseAddress = new Uri(apiBase);
 })
-.AddHttpMessageHandler<AuthorizationMessageHandler>(); // Detta länkar ihop dem på rätt sätt
+.AddHttpMessageHandler<AuthorizationMessageHandler>();
 
-// 3. Gör den till "standard-klient" så att dina andra tjänster kan använda den
 builder.Services.AddScoped(sp =>
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("BudgetAPI"));
 

@@ -35,6 +35,10 @@
 </div>
 
 @code {
+    // FIX: Accept returnUrl so accept-invite redirects back after login.
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    private string? ReturnUrl { get; set; }
+
     private string _email = "", _password = "", _error = "";
     private bool _loading;
 
@@ -44,7 +48,12 @@
         try
         {
             var result = await AuthSvc.LoginAsync(new LoginDto(_email, _password));
-            if (result != null) Nav.NavigateTo("/");
+            if (result != null)
+            {
+                // Honour returnUrl (e.g. /accept-invite?token=...) if provided.
+                var target = !string.IsNullOrWhiteSpace(ReturnUrl) ? ReturnUrl : "/";
+                Nav.NavigateTo(target);
+            }
             else _error = "Inloggningen misslyckades.";
         }
         catch { _error = "Kunde inte ansluta till servern."; }

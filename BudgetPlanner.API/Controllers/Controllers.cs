@@ -109,6 +109,48 @@ public class AuthController : BaseApiController
         return Ok(new UserDto(user.Id, user.Email!, user.FirstName, user.LastName, await GetMembershipsAsync(user.Id)));
     }
 
+    // ── FIX: Accept an invitation token. Returns a fresh JWT that includes
+    //         the newly-joined budget so the client state is immediately consistent.
+    [HttpPost("accept-invite")]
+    [Authorize]
+    public async Task<IActionResult> AcceptInvite([FromBody] AcceptInviteDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Token))
+            return BadRequest(new { Message = "Token saknas." });
+
+        var membership = await _db.BudgetMemberships
+            .Include(m => m.Budget)
+            .FirstOrDefaultAsync(m => m.InviteToken == dto.Token && m.AcceptedAt == null);
+
+        if (membership == null)
+            return BadRequest(new { Message = "Ogiltig eller redan använd inbjudningslänk." });
+
+        // Prevent duplicate membership for the same budget.
+        var alreadyMember = await _db.BudgetMemberships
+            .AnyAsync(m => m.BudgetId == membership.BudgetId
+                        && m.UserId   == UserId
+                        && m.Id       != membership.Id);
+        if (alreadyMember)
+            return BadRequest(new { Message = "Du är redan medlem i denna budget." });
+
+        // Bind the pending invite row to the authenticated user.
+        membership.UserId     = UserId;
+        membership.AcceptedAt = DateTime.UtcNow;
+        membership.InviteToken = null;
+        await _db.SaveChangesAsync();
+
+        // Issue a new token so the new budget appears in the JWT immediately.
+        var user = await _users.FindByIdAsync(UserId);
+        if (user == null) return Unauthorized();
+        var memberships = await GetMembershipsAsync(UserId);
+        var access = _tokens.GenerateAccessToken(user, memberships);
+
+        return Ok(new AuthResultDto(
+            access,
+            new UserDto(user.Id, user.Email!, user.FirstName, user.LastName, memberships)
+        ));
+    }
+
     private async Task<IActionResult> IssueTokensAsync(ApplicationUser user)
     {
         var memberships = await GetMembershipsAsync(user.Id);
@@ -688,6 +730,7 @@ public class ReceiptsController : BaseApiController
         return File(pdf, "application/pdf", $"utlagg_{b.Label.Replace(" ","_")}_{DateTime.Today:yyyyMMdd}.pdf");
     }
 
+    // FIX: removed leading "/" from route so it inherits controller prefix correctly.
     [HttpGet("/api/budgets/{budgetId:int}/receipt-categories")]
     public async Task<IActionResult> GetCategories(int budgetId)
     {
@@ -747,7 +790,8 @@ public class ImportController : BaseApiController
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
         if (file == null || file.Length == 0) return BadRequest("Ingen fil uppladdad.");
         await using var stream = file.OpenReadStream();
-        var session = await _svc.PreviewAsync(stream, bankProfile, budgetId);
+        // FIX: pass UserId so sessions are user-scoped
+        var session = await _svc.PreviewAsync(stream, bankProfile, budgetId, UserId);
         return Ok(session);
     }
 

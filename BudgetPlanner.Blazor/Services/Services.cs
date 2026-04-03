@@ -5,8 +5,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.SignalR.Client;
 using BudgetPlanner.Core.DTOs;
-using BudgetPlanner.Core.Services;
-using BudgetPlanner.DAL.Repositories;
 using BudgetPlanner.Domain.Enums;
 using BudgetPlanner.Domain.Models;
 using Microsoft.Extensions.Configuration;
@@ -18,7 +16,6 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     private static string? _accessToken;
     private static UserDto? _currentUser;
 
-    // Vi skapar en dedikerad HttpClient för just auth-anrop för att bryta cirkeln i DI
     private readonly HttpClient _authClient;
 
     public JwtAuthenticationStateProvider(IConfiguration config)
@@ -27,7 +24,7 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
         _authClient = new HttpClient { BaseAddress = new Uri(apiBase) };
     }
 
-    public static string? AccessToken => _accessToken;
+    public static string? AccessToken  => _accessToken;
     public static UserDto? CurrentUser => _currentUser;
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
@@ -37,7 +34,6 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
         try
         {
-            // Vi använder _authClient (utan handler) för att undvika cirkulära beroenden
             var r = await _authClient.PostAsync("api/auth/refresh", null);
             if (r.IsSuccessStatusCode)
             {
@@ -69,7 +65,7 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
         {
             var handler = new JwtSecurityTokenHandler();
             var jwt = handler.ReadJwtToken(token);
-            var id = new ClaimsIdentity(jwt.Claims, "jwt");
+            var id  = new ClaimsIdentity(jwt.Claims, "jwt");
             return new AuthenticationState(new ClaimsPrincipal(id));
         }
         catch { return Anonymous(); }
@@ -89,34 +85,38 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     }
 }
 
+// FIX: Buffer request content before first send; clone HttpRequestMessage for
+//      the 401-retry to avoid "stream already consumed" failures.
 public class AuthorizationMessageHandler : DelegatingHandler
 {
     private readonly IServiceProvider _serviceProvider;
     private bool _refreshing;
 
     public AuthorizationMessageHandler(IServiceProvider serviceProvider)
-    {
-        _serviceProvider = serviceProvider;
-    }
+        => _serviceProvider = serviceProvider;
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct)
     {
+        // Buffer the content so it can survive a second send after 401.
+        if (request.Content != null)
+            await request.Content.LoadIntoBufferAsync();
+
         if (!string.IsNullOrEmpty(JwtAuthenticationStateProvider.AccessToken))
             request.Headers.Authorization =
                 new AuthenticationHeaderValue("Bearer", JwtAuthenticationStateProvider.AccessToken);
 
         var response = await base.SendAsync(request, ct);
 
-        // Skydd: Försök inte refresha om det redan är ett auth-anrop som misslyckas
-        var isAuthRequest = request.RequestUri?.AbsolutePath.Contains("/api/auth/") ?? false;
+        var isAuthRequest = request.RequestUri?.AbsolutePath
+                                   .Contains("/api/auth/", StringComparison.OrdinalIgnoreCase) ?? false;
 
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !isAuthRequest && !_refreshing)
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            && !isAuthRequest && !_refreshing)
         {
             _refreshing = true;
             try
             {
-                // Hämta providern lazily för att undvika cirkulär DI vid uppstart
                 var authProvider = (JwtAuthenticationStateProvider)_serviceProvider
                     .GetRequiredService<AuthenticationStateProvider>();
 
@@ -124,14 +124,41 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
                 if (!string.IsNullOrEmpty(JwtAuthenticationStateProvider.AccessToken))
                 {
-                    request.Headers.Authorization =
+                    // Clone the original request so we start with a clean message.
+                    var retry = await CloneRequestAsync(request);
+                    retry.Headers.Authorization =
                         new AuthenticationHeaderValue("Bearer", JwtAuthenticationStateProvider.AccessToken);
-                    response = await base.SendAsync(request, ct);
+                    response = await base.SendAsync(retry, ct);
                 }
             }
             finally { _refreshing = false; }
         }
         return response;
+    }
+
+    /// <summary>
+    /// Creates a new HttpRequestMessage that is a shallow copy of <paramref name="src"/>,
+    /// re-using the already-buffered content so it can be sent again.
+    /// </summary>
+    private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage src)
+    {
+        var clone = new HttpRequestMessage(src.Method, src.RequestUri);
+
+        foreach (var h in src.Headers)
+            clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+
+        if (src.Content != null)
+        {
+            var ms = new MemoryStream();
+            await src.Content.CopyToAsync(ms);
+            ms.Position = 0;
+            clone.Content = new StreamContent(ms);
+
+            foreach (var h in src.Content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+        }
+
+        return clone;
     }
 }
 
@@ -183,7 +210,26 @@ public class AuthService : ApiServiceBase
         _provider.ClearToken();
     }
 
+    /// <summary>
+    /// Claims an invite token. On success the returned JWT already contains
+    /// the newly joined budget so BudgetState will update on the next navigation.
+    /// </summary>
+    public async Task<AuthResultDto?> AcceptInviteAsync(string token)
+    {
+        var response = await Http.PostAsJsonAsync("api/auth/accept-invite", new AcceptInviteDto(token));
+        if (!response.IsSuccessStatusCode)
+        {
+            var err = await response.Content.ReadFromJsonAsync<ApiError>();
+            throw new Exception(err?.Message ?? "Kunde inte acceptera inbjudan.");
+        }
+        var result = await response.Content.ReadFromJsonAsync<AuthResultDto>();
+        if (result != null) _provider.SetToken(result.AccessToken, result.User);
+        return result;
+    }
+
     public UserDto? CurrentUser => JwtAuthenticationStateProvider.CurrentUser;
+
+    private record ApiError(string Message);
 }
 
 public class BudgetService : ApiServiceBase
@@ -258,7 +304,7 @@ public class JournalApiService : ApiServiceBase
             $"page={q.Page}", $"pageSize={q.PageSize}",
             $"sortBy={q.SortBy ?? "Date"}", $"sortDir={q.SortDir ?? "desc"}"
         };
-        foreach (var t in q.IncludeTypes) parts.Add($"includeTypes={t}");
+        foreach (var t in q.IncludeTypes)    parts.Add($"includeTypes={t}");
         foreach (var s in q.ReceiptStatuses) parts.Add($"receiptStatuses={s}");
         parts.AddRange(FilterParts(q));
         return $"api/budgets/{budgetId}/journal?" + string.Join("&", parts);
@@ -269,11 +315,11 @@ public class JournalApiService : ApiServiceBase
     private static List<string> FilterParts(JournalQuery q)
     {
         var p = new List<string>();
-        if (q.FilterByStartDate && q.StartDate.HasValue) p.Add($"filterByStartDate=true&startDate={q.StartDate:yyyy-MM-dd}");
-        if (q.FilterByEndDate && q.EndDate.HasValue) p.Add($"filterByEndDate=true&endDate={q.EndDate:yyyy-MM-dd}");
+        if (q.FilterByStartDate   && q.StartDate.HasValue)         p.Add($"filterByStartDate=true&startDate={q.StartDate:yyyy-MM-dd}");
+        if (q.FilterByEndDate     && q.EndDate.HasValue)           p.Add($"filterByEndDate=true&endDate={q.EndDate:yyyy-MM-dd}");
         if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description)) p.Add($"filterByDescription=true&description={Uri.EscapeDataString(q.Description)}");
-        if (q.FilterByCategory && q.CategoryId.HasValue) p.Add($"filterByCategory=true&categoryId={q.CategoryId}");
-        if (q.FilterByProject && q.ProjectId.HasValue) p.Add($"filterByProject=true&projectId={q.ProjectId}");
+        if (q.FilterByCategory    && q.CategoryId.HasValue)        p.Add($"filterByCategory=true&categoryId={q.CategoryId}");
+        if (q.FilterByProject     && q.ProjectId.HasValue)         p.Add($"filterByProject=true&projectId={q.ProjectId}");
         return p;
     }
 
@@ -307,7 +353,7 @@ public class ReceiptApiService : ApiServiceBase
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}");
 
     public Task<ReceiptLineDto?> AddLineAsync(int budgetId, int batchId, CreateReceiptLineDto dto) =>
-    PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
+        PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
 
     public async Task DeleteLineAsync(int budgetId, int batchId, int lineId) =>
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}/lines/{lineId}");
@@ -389,7 +435,7 @@ public class ReportsApiService : ApiServiceBase
     {
         var url = $"api/budgets/{budgetId}/reports/category-breakdown";
         if (from.HasValue) url += $"?from={from:yyyy-MM-dd}";
-        if (to.HasValue) url += (from.HasValue ? "&" : "?") + $"to={to:yyyy-MM-dd}";
+        if (to.HasValue)   url += (from.HasValue ? "&" : "?") + $"to={to:yyyy-MM-dd}";
         return GetAsync<List<CategoryBreakdownItem>>(url);
     }
 }
@@ -404,20 +450,26 @@ public class ToastService
         var id = Guid.NewGuid().ToString();
         Toasts.Add(new ToastMessage
         {
-            Id = id,
+            Id      = id,
             Message = message,
-            Type = type,
-            Icon = type switch { "success" => "check_circle", "error" => "error", _ => "info" }
+            Type    = type,
+            Icon    = type switch { "success" => "check_circle", "error" => "error", _ => "info" }
         });
         OnChange?.Invoke();
         _ = Task.Delay(durationMs).ContinueWith(_ => { Remove(id); });
     }
 
     public void Success(string m) => Show(m, "success");
-    public void Error(string m) => Show(m, "error");
-    public void Info(string m) => Show(m, "info");
+    public void Error(string m)   => Show(m, "error");
+    public void Info(string m)    => Show(m, "info");
 
     public void Remove(string id) { Toasts.RemoveAll(t => t.Id == id); OnChange?.Invoke(); }
 }
 
-public class ToastMessage { public string Id { get; set; } = ""; public string Message { get; set; } = ""; public string Type { get; set; } = "info"; public string Icon { get; set; } = "info"; }
+public class ToastMessage
+{
+    public string Id      { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Type    { get; set; } = "info";
+    public string Icon    { get; set; } = "info";
+}

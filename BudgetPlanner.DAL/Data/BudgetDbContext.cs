@@ -1,7 +1,6 @@
 using BudgetPlanner.DAL.Models;
 using BudgetPlanner.Domain.Enums;
 using BudgetPlanner.Domain.Models;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -54,23 +53,9 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.NetAmount).HasColumnType("decimal(18,2)");
             e.Property(x => x.GrossAmount).HasColumnType("decimal(18,2)");
             e.Property(x => x.Rate).HasColumnType("decimal(18,4)");
-
-            e.HasOne(x => x.Category)
-                .WithMany()
-                .HasForeignKey(x => x.CategoryId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            // ÄNDRA DENNA RAD: Från SetNull till Restrict
-            e.HasOne(x => x.Project)
-                .WithMany(p => p.Transactions)
-                .HasForeignKey(x => x.ProjectId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.Restrict); // <--- Ändrad här från SetNull
-
-            e.HasMany(x => x.KonteringRows)
-                .WithOne(k => k.Transaction)
-                .HasForeignKey(k => k.TransactionId)
-                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Project).WithMany(p => p.Transactions).HasForeignKey(x => x.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.KonteringRows).WithOne(k => k.Transaction).HasForeignKey(k => k.TransactionId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<Project>(e => {
@@ -91,13 +76,7 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.DistanceKm).HasColumnType("decimal(10,2)");
             e.Property(x => x.RatePerKm).HasColumnType("decimal(10,4)");
             e.Ignore(x => x.ReimbursementAmount);
-
-            // ÄNDRA HÄR: Från SetNull till Restrict
-            e.HasOne(x => x.LinkedTransaction)
-                .WithMany()
-                .HasForeignKey(x => x.LinkedTransactionId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<VabEntry>(e => {
@@ -106,13 +85,7 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Rate).HasColumnType("decimal(5,4)");
             e.Ignore(x => x.TotalDays);
             e.Ignore(x => x.TotalAmount);
-
-            // ÄNDRA HÄR: Från SetNull till Restrict
-            e.HasOne(x => x.LinkedTransaction)
-                .WithMany()
-                .HasForeignKey(x => x.LinkedTransactionId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
         });
 
         mb.Entity<ReceiptBatchCategory>(e => {
@@ -123,28 +96,10 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
         mb.Entity<ReceiptBatch>(e => {
             e.HasKey(x => x.Id);
             e.Property(x => x.Label).HasMaxLength(200).IsRequired();
-
-            e.HasOne(x => x.Budget)
-                .WithMany()
-                .HasForeignKey(x => x.BudgetId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // ÄNDRA DENNA RAD: Från SetNull till Restrict
-            e.HasOne(x => x.Project)
-                .WithMany(p => p.ReceiptBatches)
-                .HasForeignKey(x => x.ProjectId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.Restrict); // <--- Ändrad här
-
-            e.HasOne(x => x.Category)
-                .WithMany()
-                .HasForeignKey(x => x.BatchCategoryId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            e.HasMany(x => x.Lines)
-                .WithOne(l => l.Batch)
-                .HasForeignKey(l => l.BatchId)
-                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Budget).WithMany().HasForeignKey(x => x.BudgetId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Project).WithMany(p => p.ReceiptBatches).HasForeignKey(x => x.ProjectId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.BatchCategoryId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Lines).WithOne(l => l.Batch).HasForeignKey(l => l.BatchId).OnDelete(DeleteBehavior.Cascade);
         });
 
         mb.Entity<ReceiptLine>(e => {
@@ -152,14 +107,7 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Amount).HasColumnType("decimal(18,2)");
             e.Property(x => x.ReferenceCode).HasMaxLength(20);
             e.Property(x => x.Currency).HasMaxLength(3);
-
-            // ÄNDRA HÄR: Från SetNull till Restrict
-            e.HasOne(x => x.LinkedTransaction)
-                .WithMany()
-                .HasForeignKey(x => x.LinkedTransactionId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.Restrict); // <--- Fixen här
-
+            e.HasOne(x => x.LinkedTransaction).WithMany().HasForeignKey(x => x.LinkedTransactionId).IsRequired(false).OnDelete(DeleteBehavior.Restrict);
             e.HasIndex(x => new { x.BatchId, x.SequenceNumber }).IsUnique();
         });
 
@@ -181,7 +129,7 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             e.HasIndex(x => new { x.BudgetId, x.Key }).IsUnique();
         });
 
-        // Seed system categories
+        // ── Seed system categories ────────────────────────────────────────────
         mb.Entity<Category>().HasData(
             new Category { Id = 1,  Name = "Mat",                Type = TransactionType.Expense, IsSystemCategory = true },
             new Category { Id = 2,  Name = "Hus & drift",        Type = TransactionType.Expense, IsSystemCategory = true },
@@ -197,7 +145,7 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             new Category { Id = 12, Name = "Milersättning",      Type = TransactionType.Income,  IsSystemCategory = true }
         );
 
-        // Seed ReceiptBatchCategories
+        // ── Seed ReceiptBatchCategories ───────────────────────────────────────
         mb.Entity<ReceiptBatchCategory>().HasData(
             new ReceiptBatchCategory { Id = 1, Name = "Resor & Transport",      IconName = "directions_car", SortOrder = 1, Description = "Tåg, flyg, hotell, parkering, taxi" },
             new ReceiptBatchCategory { Id = 2, Name = "Representation",         IconName = "restaurant",     SortOrder = 2, Description = "Kundluncher, middag, presentkort" },
@@ -208,26 +156,8 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             new ReceiptBatchCategory { Id = 7, Name = "Övrigt",                 IconName = "more_horiz",     SortOrder = 7, Description = "Utlägg som inte passar annan kategori" }
         );
 
-
-        // I BudgetDbContext.cs -> OnModelCreating
-        var hasher = new PasswordHasher<ApplicationUser>();
-        var adminUser = new ApplicationUser
-        {
-            Id = "admin-uuid-123", // Ge den ett statiskt ID
-            UserName = "admin@budget.se",
-            NormalizedUserName = "ADMIN@BUDGET.SE",
-            Email = "admin@budget.se",
-            NormalizedEmail = "ADMIN@BUDGET.SE",
-            EmailConfirmed = true,
-            FirstName = "Admin",
-            LastName = "Budgetsson",
-            SecurityStamp = Guid.NewGuid().ToString()
-        };
-
-        adminUser.PasswordHash = hasher.HashPassword(adminUser, "Nygatan12!");
-
-        mb.Entity<ApplicationUser>().HasData(adminUser);
-
-
+        // ── PHASE 1: Admin user is NO LONGER seeded here. ─────────────────────
+        // Use DbInitializer.InitializeAsync() in Program.cs instead.
+        // Admin credentials are read from AdminSetup:Email / AdminSetup:Password config.
     }
 }
