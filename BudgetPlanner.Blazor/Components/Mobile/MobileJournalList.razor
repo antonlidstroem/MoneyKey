@@ -18,10 +18,7 @@
             <button class="mobile-icon-btn @(Filter.HasActiveFilters ? "active" : "")"
                     @onclick="() => _filterOpen = true">
                 <span class="material-icons">filter_list</span>
-                @if (Filter.HasActiveFilters)
-                {
-                    <span class="mobile-badge"></span>
-                }
+                @if (Filter.HasActiveFilters) { <span class="mobile-badge"></span> }
             </button>
         </div>
     </div>
@@ -51,17 +48,13 @@
 
     <div class="mobile-chips">
         <button class="mobile-chip @(!Filter.Query.IncludeTypes.Any() ? "active" : "")"
-                @onclick="Filter.ShowAllTypes">
-            Alla
-        </button>
+                @onclick="Filter.ShowAllTypes">Alla</button>
         @foreach (var t in Enum.GetValues<JournalEntryType>())
         {
             var type = t;
             var solo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
             <button class="mobile-chip @(solo ? "active" : "")"
-                    @onclick="() => Filter.SetOnlyType(type)">
-                @ShortLabel(type)
-            </button>
+                    @onclick="() => Filter.SetOnlyType(type)">@ShortLabel(type)</button>
         }
     </div>
 
@@ -109,36 +102,32 @@
                             }
                             else
                             {
-
-                                @(e.CategoryName ?? e.TypeLabel) @if (e.ProjectName != null) {
-                                <span> · @e.ProjectName</span>
+                                @(e.CategoryName ?? e.TypeLabel)
+                                @if (e.ProjectName != null) { <span> · @e.ProjectName</span> }
                             }
-     }
+                        </div>
+                    </div>
+                    <div class="mobile-row-right">
+                        <div class="mobile-row-amount @AmountCss(e)">@FormatAmount(e)</div>
+                        <div class="mobile-row-date">@e.Date.ToString("d MMM")</div>
+                        @if (e.Status != null)
+                        {
+                            <div class="mobile-status-dot @StatusDot(e.Status)"></div>
+                        }
                     </div>
                 </div>
-                <div class="mobile-row-right">
-                    <div class="mobile-row-amount @AmountCss(e)">@FormatAmount(e)</div>
-                    <div class="mobile-row-date">@e.Date.ToString("d MMM")</div>
-                    @if (e.Status != null)
-                    {
-                        <div class="mobile-status-dot @StatusDot(e.Status)"></div>
-                    }
+            }
+
+            @if (Filter.Query.Page < _totalPages)
+            {
+                <div style="text-align:center;padding:16px">
+                    <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
+                        @if (_loadingMore) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                        Ladda fler (@(_totalCount - _entries.Count) kvar)
+                    </button>
                 </div>
-            </div>
+            }
         }
-        @if (Filter.Query.Page < _totalPages)
-        {
-            <div style="text-align:center;padding:16px">
-                <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
-                    @if (_loadingMore)
-                    {
-                        <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
-                    }
-                    Ladda fler (@(_totalCount - _entries.Count) kvar)
-                </button>
-            </div>
-        }
-                }
     </div>
 
     @if (BudgetState.CanEdit)
@@ -194,7 +183,8 @@
             <div class="sheet-actions">
                 @if (_detail.EntryType == JournalEntryType.ReceiptBatch)
                 {
-                    <button class="btn btn-primary" @onclick='() => { var id = _detail.SourceId; _detail = null; Nav.NavigateTo($"/receipts/{id}"); }'>
+                    <button class="btn btn-primary"
+                            @onclick='() => { var id = _detail.SourceId; _detail = null; Nav.NavigateTo($"/receipts/{id}"); }'>
                         <span class="material-icons" style="font-size:.9rem">open_in_new</span> Öppna underlag
                     </button>
                 }
@@ -203,27 +193,41 @@
     </div>
 }
 
-@* (Add and Filter sheets omitted for brevity, same as user's original but safe) *@
-
 @code {
     private List<JournalEntryDto> _entries = new();
-    private SummaryDto? _summary;
-    private JournalEntryDto? _detail;
-    private ElementReference _searchRef;
-    private string _searchText = "";
-    private bool _loading = true, _loadingMore, _searchOpen, _addOpen, _filterOpen;
-    private int _totalCount, _totalPages;
+    private SummaryDto?           _summary;
+    private JournalEntryDto?      _detail;
+    private ElementReference      _searchRef;
+    private string _searchText  = "";
+    private bool   _loading     = true;
+    private bool   _loadingMore = false;
+    private bool   _searchOpen  = false;
+    private bool   _addOpen     = false;
+    private bool   _filterOpen  = false;
+    private int    _totalCount, _totalPages;
 
     protected override async Task OnInitializedAsync()
     {
-        Filter.FilterChanged += OnFilterChanged;
+        Filter.FilterChanged    += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
-        SignalR.OnBudgetEvent += OnSignalR;
+        SignalR.OnBudgetEvent   += OnSignalR;
         await LoadAsync(true);
     }
 
-    private async void OnFilterChanged() { await LoadAsync(true); await InvokeAsync(StateHasChanged); }
-    private async void OnStateChanged() { await LoadAsync(true); await InvokeAsync(StateHasChanged); }
+    // FIX: async void replaced with InvokeAsync wrapper that surfaces exceptions via Toast
+    private void OnFilterChanged() => InvokeAsync(async () =>
+    {
+        try   { await LoadAsync(true); }
+        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        StateHasChanged();
+    });
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        try   { await LoadAsync(true); }
+        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        StateHasChanged();
+    });
 
     private async Task LoadAsync(bool reset)
     {
@@ -232,63 +236,100 @@
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
         if (r.HasValue)
         {
-            _entries = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
+            // FIX: reset replaces the list, LoadMore appends
+            _entries    = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
             _totalCount = r.Value.Result.TotalCount;
             _totalPages = r.Value.Result.TotalPages;
-            _summary = r.Value.Summary;
+            _summary    = r.Value.Summary;
         }
         _loading = false;
     }
 
     private async Task LoadMore()
     {
-        _loadingMore = true; Filter.Query.Page++;
-        var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
-        if (r.HasValue) _entries.AddRange(r.Value.Result.Items);
-        _loadingMore = false;
+        _loadingMore = true;
+        Filter.Query.Page++;
+        try
+        {
+            var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
+            if (r.HasValue)
+            {
+                _entries.AddRange(r.Value.Result.Items);
+                _totalCount = r.Value.Result.TotalCount;
+                _totalPages = r.Value.Result.TotalPages;
+            }
+        }
+        catch (Exception ex) { Toast.Error($"Fel vid laddning: {ex.Message}"); }
+        finally { _loadingMore = false; }
     }
 
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
-        await LoadAsync(true); await InvokeAsync(StateHasChanged);
+        try   { await LoadAsync(true); }
+        catch (Exception ex) { Toast.Error($"Realtime-uppdatering misslyckades: {ex.Message}"); }
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ToggleSearch()
     {
         _searchOpen = !_searchOpen;
-        if (_searchOpen) await Task.Delay(80).ContinueWith(_ => _searchRef.FocusAsync());
+        if (_searchOpen)
+            await Task.Delay(80).ContinueWith(_ => _searchRef.FocusAsync());
     }
 
-    private void CloseSearch() { _searchOpen = false; _searchText = ""; Filter.Update(q => { q.FilterByDescription = false; q.Description = null; }); }
-    private void OnSearch() => Filter.Update(q => { q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText); q.Description = _searchText; });
+    private void CloseSearch()
+    {
+        _searchOpen  = false;
+        _searchText  = "";
+        Filter.Update(q => { q.FilterByDescription = false; q.Description = null; });
+    }
+
+    private void OnSearch() => Filter.Update(q =>
+    {
+        q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText);
+        q.Description = _searchText;
+    });
 
     private static string ShortLabel(JournalEntryType t) => t switch
     {
-        JournalEntryType.Transaction => "Transakt.",
+        JournalEntryType.Transaction   => "Transakt.",
         JournalEntryType.Milersattning => "Milersättn.",
-        JournalEntryType.Vab => "VAB",
-        JournalEntryType.ReceiptBatch => "Kvitton",
-        _ => t.ToString()
+        JournalEntryType.Vab           => "VAB",
+        JournalEntryType.ReceiptBatch  => "Kvitton",
+        _                              => t.ToString()
     };
 
     private static string DotCss(JournalEntryType t) => t switch
     {
-        JournalEntryType.Transaction => "dot-tx",
+        JournalEntryType.Transaction   => "dot-tx",
         JournalEntryType.Milersattning => "dot-mi",
-        JournalEntryType.Vab => "dot-vab",
-        JournalEntryType.ReceiptBatch => "dot-kvitto",
-        _ => "dot-tx"
+        JournalEntryType.Vab           => "dot-vab",
+        JournalEntryType.ReceiptBatch  => "dot-kvitto",
+        _                              => "dot-tx"
     };
 
-    private static string AmountCss(JournalEntryDto e) => e.EntryType == JournalEntryType.ReceiptBatch ? "" : e.Amount >= 0 ? "amount-pos" : "amount-neg";
-    private static string FormatAmount(JournalEntryDto e) => e.EntryType == JournalEntryType.ReceiptBatch ? $"{e.Amount:N0} kr" : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
-    private static string StatusDot(string s) => s switch { "Inskickad" => "status-dot-warning", "Godkänd" => "status-dot-success", "Avslagen" => "status-dot-danger", "Utbetald" => "status-dot-info", _ => "" };
+    private static string AmountCss(JournalEntryDto e) =>
+        e.EntryType == JournalEntryType.ReceiptBatch ? "" : e.Amount >= 0 ? "amount-pos" : "amount-neg";
+
+    private static string FormatAmount(JournalEntryDto e) =>
+        e.EntryType == JournalEntryType.ReceiptBatch
+            ? $"{e.Amount:N0} kr"
+            : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
+
+    private static string StatusDot(string s) => s switch
+    {
+        "Inskickad" => "status-dot-warning",
+        "Godkänd"   => "status-dot-success",
+        "Avslagen"  => "status-dot-danger",
+        "Utbetald"  => "status-dot-info",
+        _           => ""
+    };
 
     public void Dispose()
     {
-        Filter.FilterChanged -= OnFilterChanged;
+        Filter.FilterChanged    -= OnFilterChanged;
         BudgetState.StateChanged -= OnStateChanged;
-        SignalR.OnBudgetEvent -= OnSignalR;
+        SignalR.OnBudgetEvent   -= OnSignalR;
     }
 }

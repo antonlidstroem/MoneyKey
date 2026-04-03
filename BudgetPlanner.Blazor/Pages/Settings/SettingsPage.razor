@@ -9,8 +9,22 @@
 
     <div class="card">
         <div class="card-title"><span class="material-icons">manage_accounts</span> Budget</div>
-        <div class="form-group"><label class="form-label">Budgetnamn</label><input class="form-control" @bind="_budgetName" /></div>
-        <button class="btn btn-primary btn-sm" @onclick="SaveBudgetAsync">Spara</button>
+        <div class="form-group">
+            <label class="form-label">Budgetnamn</label>
+            <input class="form-control" @bind="_budgetName" />
+        </div>
+        <div class="form-group">
+            <label class="form-label">Beskrivning</label>
+            <input class="form-control" @bind="_budgetDescription" placeholder="Valfri beskrivning..." />
+        </div>
+        @if (!string.IsNullOrEmpty(_saveError))
+        {
+            <div style="color:var(--color-expense);font-size:.85rem;margin-bottom:8px">@_saveError</div>
+        }
+        <button class="btn btn-primary btn-sm" @onclick="SaveBudgetAsync" disabled="@_saving">
+            @if (_saving) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+            Spara
+        </button>
     </div>
 
     @if (BudgetState.IsOwner)
@@ -41,24 +55,56 @@
 </div>
 
 @code {
-    private string _budgetName = "";
-    private string _inviteEmail = "";
+    private string _budgetName        = "";
+    private string _budgetDescription = "";
+    private string _inviteEmail       = "";
+    private string _saveError         = "";
     private BudgetMemberRole _inviteRole = BudgetMemberRole.Editor;
-    private bool _inviting;
+    private bool _saving, _inviting;
 
-    protected override void OnInitialized() => _budgetName = BudgetState.ActiveBudgetName;
+    protected override void OnInitialized()
+    {
+        _budgetName        = BudgetState.ActiveBudgetName;
+        _budgetDescription = "";   // description not cached in BudgetState; blank default
+    }
 
+    // FIX: was a no-op that only showed a toast. Now calls the API.
     private async Task SaveBudgetAsync()
     {
-        Toast.Success("Budget uppdaterad.");
-        await Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(_budgetName))
+        {
+            _saveError = "Budgetnamnet får inte vara tomt.";
+            return;
+        }
+        _saveError = "";
+        _saving    = true;
+        try
+        {
+            await BudgetSvc.UpdateAsync(
+                BudgetState.ActiveBudgetId,
+                new UpdateBudgetDto(_budgetName.Trim(), _budgetDescription));
+
+            // Reflect the new name in local state so the sidebar updates immediately.
+            BudgetState.UpdateActiveBudgetName(_budgetName.Trim());
+            Toast.Success("Budget uppdaterad.");
+        }
+        catch (Exception ex)
+        {
+            _saveError = ex.Message;
+        }
+        finally { _saving = false; }
     }
 
     private async Task InviteAsync()
     {
         if (string.IsNullOrWhiteSpace(_inviteEmail)) return;
         _inviting = true;
-        try { await BudgetSvc.InviteAsync(BudgetState.ActiveBudgetId, new InviteMemberDto(_inviteEmail, _inviteRole)); Toast.Success("Inbjudan skickad."); _inviteEmail = ""; }
+        try
+        {
+            await BudgetSvc.InviteAsync(BudgetState.ActiveBudgetId, new InviteMemberDto(_inviteEmail, _inviteRole));
+            Toast.Success("Inbjudan skickad.");
+            _inviteEmail = "";
+        }
         catch (Exception ex) { Toast.Error(ex.Message); }
         finally { _inviting = false; }
     }

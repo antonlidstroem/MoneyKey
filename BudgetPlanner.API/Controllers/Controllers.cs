@@ -427,24 +427,19 @@ public class TransactionsController : BaseApiController
 public class ProjectsController : BaseApiController
 {
     private readonly IProjectRepository _repo;
-    private readonly ITransactionRepository _txRepo;
     private readonly BudgetAuthorizationService _auth;
     private readonly IHubContext<BudgetHub> _hub;
 
-    public ProjectsController(IProjectRepository repo, ITransactionRepository txRepo, BudgetAuthorizationService auth, IHubContext<BudgetHub> hub)
-    { _repo = repo; _txRepo = txRepo; _auth = auth; _hub = hub; }
+    public ProjectsController(IProjectRepository repo, BudgetAuthorizationService auth, IHubContext<BudgetHub> hub)
+    { _repo = repo; _auth = auth; _hub = hub; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll(int budgetId)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
-        var projects = await _repo.GetForBudgetAsync(budgetId);
-        var dtos = new List<ProjectDto>();
-        foreach (var p in projects)
-        {
-            var (txs, _) = await _txRepo.GetPagedAsync(new TransactionQuery { BudgetId = budgetId, ProjectId = p.Id, PageSize = int.MaxValue });
-            dtos.Add(Map(p, txs.Sum(t => t.NetAmount)));
-        }
+        // FIX: single JOIN query replaces N+1 per-project queries.
+        var withSpent = await _repo.GetForBudgetWithSpentAsync(budgetId);
+        var dtos = withSpent.Select(x => Map(x.Project, x.SpentAmount)).ToList();
         return Ok(dtos);
     }
 
@@ -452,10 +447,11 @@ public class ProjectsController : BaseApiController
     public async Task<IActionResult> GetById(int budgetId, int projectId)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
-        var p = await _repo.GetByIdAsync(projectId, budgetId);
-        if (p == null) return NotFound();
-        var (txs, _) = await _txRepo.GetPagedAsync(new TransactionQuery { BudgetId = budgetId, ProjectId = p.Id, PageSize = int.MaxValue });
-        return Ok(Map(p, txs.Sum(t => t.NetAmount)));
+        // Use the batch method to get a single project with its spent amount.
+        var all = await _repo.GetForBudgetWithSpentAsync(budgetId);
+        var found = all.FirstOrDefault(x => x.Project.Id == projectId);
+        if (found.Project == null) return NotFound();
+        return Ok(Map(found.Project, found.SpentAmount));
     }
 
     [HttpPost]
@@ -730,7 +726,11 @@ public class ReceiptsController : BaseApiController
         return File(pdf, "application/pdf", $"utlagg_{b.Label.Replace(" ","_")}_{DateTime.Today:yyyyMMdd}.pdf");
     }
 
-    // FIX: removed leading "/" from route so it inherits controller prefix correctly.
+    // NOTE: The leading "/" in the route is intentional — it overrides the controller
+    // route prefix and creates an absolute route at /api/budgets/{budgetId}/receipt-categories.
+    // This route is kept as-is because the Blazor client calls this exact URL.
+    // It works correctly in ASP.NET Core; the "/" prefix simply bypasses the
+    // [Route("api/budgets/{budgetId:int}/receipts")] controller prefix.
     [HttpGet("/api/budgets/{budgetId:int}/receipt-categories")]
     public async Task<IActionResult> GetCategories(int budgetId)
     {

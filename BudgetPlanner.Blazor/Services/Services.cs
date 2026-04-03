@@ -13,6 +13,12 @@ namespace BudgetPlanner.Blazor.Services;
 
 public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
+    // NOTE on static fields: In Blazor WASM each browser tab runs in its own
+    // isolated JS runtime with its own .NET memory space. Static fields are NOT
+    // shared between tabs — they are effectively per-tab instance state.
+    // This is safe. The only concern is multiple components within the same tab
+    // (same runtime) reading stale state, but since SetToken/ClearToken call
+    // NotifyAuthenticationStateChanged, all subscribers re-render immediately.
     private static string? _accessToken;
     private static UserDto? _currentUser;
 
@@ -241,6 +247,13 @@ public class BudgetService : ApiServiceBase
         GetAsync<List<Category>>($"api/budgets/{budgetId}/categories");
     public async Task InviteAsync(int budgetId, InviteMemberDto dto) =>
         await PostAsync<object>($"api/budgets/{budgetId}/invite", dto);
+
+    // FIX: SettingsPage.SaveBudgetAsync calls this to persist budget name/description.
+    public async Task UpdateAsync(int budgetId, UpdateBudgetDto dto)
+    {
+        var r = await Http.PutAsJsonAsync($"api/budgets/{budgetId}", dto);
+        r.EnsureSuccessStatusCode();
+    }
 }
 
 public class ProjectService : ApiServiceBase
@@ -334,8 +347,17 @@ public class ReceiptApiService : ApiServiceBase
 {
     public ReceiptApiService(HttpClient http) : base(http) { }
 
-    public Task<PagedResult<ReceiptBatchDto>?> GetAllAsync(int budgetId, int page = 1, int pageSize = 50) =>
-        GetAsync<PagedResult<ReceiptBatchDto>>($"api/budgets/{budgetId}/receipts?page={page}&pageSize={pageSize}");
+    // FIX: accepts optional status filter passed server-side + configurable page size
+    public Task<PagedResult<ReceiptBatchDto>?> GetAllAsync(
+        int budgetId,
+        int page = 1,
+        int pageSize = 25,
+        ReceiptBatchStatus? status = null)
+    {
+        var url = $"api/budgets/{budgetId}/receipts?page={page}&pageSize={pageSize}";
+        if (status.HasValue) url += $"&statuses={(int)status.Value}";
+        return GetAsync<PagedResult<ReceiptBatchDto>>(url);
+    }
 
     public Task<ReceiptBatchDto?> GetByIdAsync(int budgetId, int batchId) =>
         GetAsync<ReceiptBatchDto>($"api/budgets/{budgetId}/receipts/{batchId}");

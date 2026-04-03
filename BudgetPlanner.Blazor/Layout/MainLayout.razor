@@ -85,6 +85,10 @@
     [CascadingParameter]
     private Task<AuthenticationState>? AuthStateTask { get; set; }
 
+    // FIX: inject AuthenticationStateProvider so it can be passed to SignalR
+    // for token refresh on reconnect.
+    [Inject] private AuthenticationStateProvider AuthProvider { get; set; } = null!;
+
     private string Initials => AuthSvc.CurrentUser is { } u
         ? $"{u.FirstName?.FirstOrDefault()}{u.LastName?.FirstOrDefault()}".ToUpper()
         : "?";
@@ -94,31 +98,23 @@
         if (AuthStateTask != null)
         {
             var authState = await AuthStateTask;
-            var user = authState.User;
-
-            // Kör endast API-anrop om användaren faktiskt är inloggad
-            if (user.Identity is not null && user.Identity.IsAuthenticated)
+            if (authState.User.Identity is not null && authState.User.Identity.IsAuthenticated)
             {
                 try
                 {
-                    // 1. Hämta budgetar
                     var budgets = await BudgetSvc.GetMyBudgetsAsync();
-                    if (budgets != null)
-                    {
-                        BudgetState.SetBudgets(budgets);
-                    }
+                    if (budgets != null) BudgetState.SetBudgets(budgets);
 
-                    // 2. Koppla upp SignalR om vi har en token
                     var token = Services.JwtAuthenticationStateProvider.AccessToken;
                     if (!string.IsNullOrEmpty(token))
                     {
                         var apiBase = Config["ApiBaseUrl"] ?? "https://localhost:7000";
-                        await SignalR.ConnectAsync(apiBase, token, BudgetState.ActiveBudgetId);
+                        // FIX: pass AuthProvider so SignalR can refresh tokens on reconnect.
+                        await SignalR.ConnectAsync(apiBase, token, BudgetState.ActiveBudgetId, AuthProvider);
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Logga fel men låt appen leva vidare
                     Console.WriteLine($"Fel vid initiering av MainLayout: {ex.Message}");
                 }
             }

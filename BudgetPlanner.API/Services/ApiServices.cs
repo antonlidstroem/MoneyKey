@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;  // Framework's JwtRegisteredClaimNames — FIX #1
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -16,12 +16,6 @@ using BudgetPlanner.Domain.Models;
 namespace BudgetPlanner.API.Services;
 
 // ─── CURRENT USER ACCESSOR ────────────────────────────────────────────────────
-// FIX BUG 1: ICurrentUserAccessor is defined ONLY in BudgetPlanner.DAL.Data.
-// HttpCurrentUserAccessor implements that single interface.
-// The duplicate interface that was here has been removed — having two interfaces
-// with the same name in different namespaces causes DI to resolve the wrong type
-// for AuditInterceptor, which takes BudgetPlanner.DAL.Data.ICurrentUserAccessor.
-
 public class HttpCurrentUserAccessor : ICurrentUserAccessor
 {
     private readonly IHttpContextAccessor _http;
@@ -47,9 +41,9 @@ public class TokenService
     public string GenerateAccessToken(ApplicationUser user, List<BudgetMembershipDto> memberships)
     {
         var jwtSection = _cfg.GetSection("Jwt");
-        var key        = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Secret"]!));
-        var creds      = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var expiry     = DateTime.UtcNow.AddMinutes(int.Parse(jwtSection["AccessTokenExpiryMinutes"] ?? "15"));
+        var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["Secret"]!));
+        var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+        var expiry = DateTime.UtcNow.AddMinutes(int.Parse(jwtSection["AccessTokenExpiryMinutes"] ?? "15"));
 
         var claims = new List<Claim>
         {
@@ -68,9 +62,9 @@ public class TokenService
 
     public async Task<(string rawToken, RefreshToken entity)> GenerateRefreshTokenAsync(string userId)
     {
-        var raw   = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
-        var hash  = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
-        var days  = int.Parse(_cfg["Jwt:RefreshTokenExpiryDays"] ?? "30");
+        var raw    = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var hash   = Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(raw)));
+        var days   = int.Parse(_cfg["Jwt:RefreshTokenExpiryDays"] ?? "30");
         var entity = new RefreshToken { UserId = userId, TokenHash = hash, ExpiresAt = DateTime.UtcNow.AddDays(days) };
         _db.RefreshTokens.Add(entity);
         await _db.SaveChangesAsync();
@@ -108,18 +102,36 @@ public class BudgetAuthorizationService
         await _db.BudgetMemberships
             .FirstOrDefaultAsync(m => m.BudgetId == budgetId && m.UserId == userId && m.AcceptedAt != null);
 
+    /// <summary>
+    /// Returns true when the user's role is at least <paramref name="minimumRole"/>.
+    ///
+    /// Role hierarchy (highest → lowest):
+    ///   Owner (4) > Editor (3) > Auditor (2) > Viewer (1)
+    ///
+    ///   • Owner   — full control: create / edit / delete / approve / audit / view
+    ///   • Editor  — create / edit / delete transactions; view everything
+    ///   • Auditor — read-only access to audit log AND journal; cannot edit
+    ///   • Viewer  — read-only access to journal only; cannot see audit log
+    ///
+    /// PHASE 4 FIX: replaced ad-hoc pattern-matching with numeric rank comparison.
+    /// Previously Auditor was excluded from Viewer-level satisfaction, meaning
+    /// Auditors could reach the audit endpoint but not the journal.
+    /// </summary>
     public async Task<bool> HasRoleAsync(int budgetId, string userId, BudgetMemberRole minimumRole)
     {
         var m = await GetMembershipAsync(budgetId, userId);
         if (m == null) return false;
-        return minimumRole switch
+
+        static int Rank(BudgetMemberRole r) => r switch
         {
-            BudgetMemberRole.Viewer  => true,
-            BudgetMemberRole.Auditor => m.Role is BudgetMemberRole.Auditor or BudgetMemberRole.Editor or BudgetMemberRole.Owner,
-            BudgetMemberRole.Editor  => m.Role is BudgetMemberRole.Editor  or BudgetMemberRole.Owner,
-            BudgetMemberRole.Owner   => m.Role == BudgetMemberRole.Owner,
-            _ => false
+            BudgetMemberRole.Viewer  => 1,
+            BudgetMemberRole.Auditor => 2,
+            BudgetMemberRole.Editor  => 3,
+            BudgetMemberRole.Owner   => 4,
+            _                        => 0
         };
+
+        return Rank(m.Role) >= Rank(minimumRole);
     }
 }
 
@@ -146,22 +158,25 @@ public class MailKitEmailService : IEmailService
     private readonly EmailOptions _opts;
     private readonly ILogger<MailKitEmailService> _log;
 
-    public MailKitEmailService(EmailOptions opts, ILogger<MailKitEmailService> log) { _opts = opts; _log = log; }
+    public MailKitEmailService(EmailOptions opts, ILogger<MailKitEmailService> log)
+    { _opts = opts; _log = log; }
 
     public Task SendInviteAsync(string toEmail, string budgetName, string inviteToken, string baseUrl) =>
         SendAsync(toEmail,
             $"Inbjudan till budgeten \"{budgetName}\"",
             $"<p>Du har bjudits in till <strong>{budgetName}</strong>.</p>" +
-            $"<p><a href=\"{baseUrl}/accept-invite?token={inviteToken}\" style=\"display:inline-block;padding:10px 20px;background:#1565C0;color:#fff;border-radius:6px;text-decoration:none\">Acceptera inbjudan</a></p>");
+            $"<p><a href=\"{baseUrl}/accept-invite?token={inviteToken}\" " +
+            $"style=\"display:inline-block;padding:10px 20px;background:#1565C0;color:#fff;border-radius:6px;text-decoration:none\">" +
+            $"Acceptera inbjudan</a></p>");
 
     public Task SendReceiptStatusChangedAsync(string toEmail, string batchLabel, string newStatus, string? reason = null)
     {
         var (subj, verb) = newStatus switch
         {
-            "Approved"   => ($"Utläggsunderlag godkänt: \"{batchLabel}\"",     "godkändes"),
-            "Rejected"   => ($"Utläggsunderlag avslaget: \"{batchLabel}\"",    "avslogs"),
-            "Reimbursed" => ($"Utlägg utbetalt: \"{batchLabel}\"",             "markerades som utbetalt"),
-            _            => ($"Status uppdaterad: \"{batchLabel}\"",           "uppdaterades")
+            "Approved"   => ($"Utläggsunderlag godkänt: \"{batchLabel}\"",  "godkändes"),
+            "Rejected"   => ($"Utläggsunderlag avslaget: \"{batchLabel}\"", "avslogs"),
+            "Reimbursed" => ($"Utlägg utbetalt: \"{batchLabel}\"",          "markerades som utbetalt"),
+            _            => ($"Status uppdaterad: \"{batchLabel}\"",        "uppdaterades")
         };
         var body = $"<p>Ditt underlag <strong>\"{batchLabel}\"</strong> {verb}.</p>"
                  + (reason != null ? $"<p><strong>Orsak:</strong> {reason}</p>" : "");
@@ -188,10 +203,9 @@ public class MailKitEmailService : IEmailService
             msg.Subject = subject;
             msg.Body = new TextPart("html")
             {
-                Text = $"<!DOCTYPE html><html><body style=\"font-family:Arial,sans-serif;color:#37474F;max-width:560px;margin:0 auto;padding:24px\">"
-                     + $"<div style=\"border-bottom:2px solid #1565C0;padding-bottom:12px;margin-bottom:20px\"><strong style=\"color:#1565C0;font-size:18px\">BudgetPlanner</strong></div>"
-                     + htmlBody
-                     + "</body></html>"
+                Text = "<!DOCTYPE html><html><body style=\"font-family:Arial,sans-serif;color:#37474F;max-width:560px;margin:0 auto;padding:24px\">"
+                     + "<div style=\"border-bottom:2px solid #1565C0;padding-bottom:12px;margin-bottom:20px\"><strong style=\"color:#1565C0;font-size:18px\">BudgetPlanner</strong></div>"
+                     + htmlBody + "</body></html>"
             };
             using var client = new SmtpClient();
             await client.ConnectAsync(_opts.SmtpHost, _opts.SmtpPort, SecureSocketOptions.StartTls);
