@@ -27,8 +27,10 @@
     {
         <div class="mobile-search-bar">
             <span class="material-icons" style="font-size:1rem;color:var(--color-muted)">search</span>
-            <input @ref="_searchRef" placeholder="Sök beskrivning..."
-                   @bind="_searchText" @bind:event="oninput" @bind:after="OnSearch"
+            <input @ref="_searchRef"
+                   placeholder="Sök beskrivning..."
+                   value="@_searchText"
+                   @oninput="OnSearchInput"
                    style="flex:1;border:none;outline:none;background:transparent;font-size:.875rem" />
             <button class="mobile-icon-btn" @onclick="CloseSearch">
                 <span class="material-icons" style="font-size:1rem">close</span>
@@ -39,21 +41,35 @@
     @if (_summary != null)
     {
         <div class="mobile-kpi-strip">
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Inkomster</div><div class="mobile-kpi-val pos">+@((int)_summary.FilteredIncome) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Utgifter</div><div class="mobile-kpi-val neg">@((int)_summary.FilteredExpenses) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Netto</div><div class="mobile-kpi-val @(_summary.FilteredTotal >= 0 ? "pos" : "neg")">@((int)_summary.FilteredTotal) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Poster</div><div class="mobile-kpi-val">@_totalCount st</div></div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Inkomster</div>
+                <div class="mobile-kpi-val pos">+@((int)_summary.FilteredIncome) kr</div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Utgifter</div>
+                <div class="mobile-kpi-val neg">@((int)_summary.FilteredExpenses) kr</div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Netto</div>
+                <div class="mobile-kpi-val @(_summary.FilteredTotal >= 0 ? "pos" : "neg")">
+                    @((int)_summary.FilteredTotal) kr
+                </div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Poster</div>
+                <div class="mobile-kpi-val">@_totalCount st</div>
+            </div>
         </div>
     }
 
     <div class="mobile-chips">
         <button class="mobile-chip @(!Filter.Query.IncludeTypes.Any() ? "active" : "")"
-                @onclick="Filter.ShowAllTypes">Alla</button>
+                @onclick="() => Filter.ShowAllTypes()">Alla</button>
         @foreach (var t in Enum.GetValues<JournalEntryType>())
         {
             var type = t;
-            var solo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
-            <button class="mobile-chip @(solo ? "active" : "")"
+            var isSolo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
+            <button class="mobile-chip @(isSolo ? "active" : "")"
                     @onclick="() => Filter.SetOnlyType(type)">@ShortLabel(type)</button>
         }
     </div>
@@ -122,7 +138,10 @@
             {
                 <div style="text-align:center;padding:16px">
                     <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
-                        @if (_loadingMore) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                        @if (_loadingMore)
+                        {
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        }
                         Ladda fler (@(_totalCount - _entries.Count) kvar)
                     </button>
                 </div>
@@ -132,7 +151,7 @@
 
     @if (BudgetState.CanEdit)
     {
-        <button class="mobile-fab" @onclick="() => _addOpen = true">
+        <button class="mobile-fab" @onclick='() => Nav.NavigateTo("/?newTx=1")'>
             <span class="material-icons">add</span>
         </button>
     }
@@ -154,37 +173,58 @@
             </div>
             <div class="sheet-amount @AmountCss(_detail)">@FormatAmount(_detail)</div>
             <div class="sheet-fields">
-                <div class="sheet-field"><span class="sheet-field-label">Datum</span><span class="sheet-field-val">@_detail.Date.ToString("yyyy-MM-dd")</span></div>
-                <div class="sheet-field"><span class="sheet-field-label">Typ</span><span class="sheet-field-val">@_detail.TypeLabel</span></div>
+                <div class="sheet-field">
+                    <span class="sheet-field-label">Datum</span>
+                    <span class="sheet-field-val">@_detail.Date.ToString("yyyy-MM-dd")</span>
+                </div>
+                <div class="sheet-field">
+                    <span class="sheet-field-label">Typ</span>
+                    <span class="sheet-field-val">@_detail.TypeLabel</span>
+                </div>
                 @if (_detail.CategoryName != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Kategori</span><span class="sheet-field-val">@_detail.CategoryName</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Kategori</span>
+                        <span class="sheet-field-val">@_detail.CategoryName</span>
+                    </div>
                 }
                 @if (_detail.ProjectName != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Projekt</span><span class="sheet-field-val">@_detail.ProjectName</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Projekt</span>
+                        <span class="sheet-field-val">@_detail.ProjectName</span>
+                    </div>
                 }
                 @if (_detail.MetaLine != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Detalj</span><span class="sheet-field-val">@_detail.MetaLine</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Detalj</span>
+                        <span class="sheet-field-val">@_detail.MetaLine</span>
+                    </div>
                 }
                 @if (_detail.Status != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Status</span><span class="sheet-field-val">@_detail.Status</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Status</span>
+                        <span class="sheet-field-val">@_detail.Status</span>
+                    </div>
                 }
                 @if (_detail.ReferenceCode != null)
                 {
                     <div class="sheet-field">
                         <span class="sheet-field-label">Referens</span>
-                        <span class="sheet-field-val" style="font-family:monospace;font-weight:700;color:var(--color-primary)">@_detail.ReferenceCode</span>
+                        <span class="sheet-field-val" style="font-family:monospace;font-weight:700;color:var(--color-primary)">
+                            @_detail.ReferenceCode
+                        </span>
                     </div>
                 }
             </div>
             <div class="sheet-actions">
                 @if (_detail.EntryType == JournalEntryType.ReceiptBatch)
                 {
+                    var detailId = _detail.SourceId;
                     <button class="btn btn-primary"
-                            @onclick='() => { var id = _detail.SourceId; _detail = null; Nav.NavigateTo($"/receipts/{id}"); }'>
+                            @onclick='() => { _detail = null; Nav.NavigateTo($"/receipts/{detailId}"); }'>
                         <span class="material-icons" style="font-size:.9rem">open_in_new</span> Öppna underlag
                     </button>
                 }
@@ -194,38 +234,68 @@
 }
 
 @code {
-    private List<JournalEntryDto> _entries = new();
+    private List<JournalEntryDto> _entries     = new();
     private SummaryDto?           _summary;
     private JournalEntryDto?      _detail;
     private ElementReference      _searchRef;
     private string _searchText  = "";
     private bool   _loading     = true;
-    private bool   _loadingMore = false;
-    private bool   _searchOpen  = false;
-    private bool   _addOpen     = false;
-    private bool   _filterOpen  = false;
-    private int    _totalCount, _totalPages;
+    private bool   _loadingMore;
+    private bool   _searchOpen;
+    private bool   _filterOpen;
+    private int    _totalCount;
+    private int    _totalPages;
 
     protected override async Task OnInitializedAsync()
     {
-        Filter.FilterChanged    += OnFilterChanged;
+        // Subscribe FIRST — before any await — so no events are missed.
+        Filter.FilterChanged     += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
-        SignalR.OnBudgetEvent   += OnSignalR;
-        await LoadAsync(true);
+        SignalR.OnBudgetEvent    += OnSignalR;
+
+        // FIX: guard against budgetId=0. If budgets haven't loaded yet, wait
+        // for OnStateChanged which fires when MainLayout calls SetBudgets.
+        if (BudgetState.ActiveBudgetId > 0)
+        {
+            // FIX: wrap in try/catch — GetFromJsonAsync in .NET 8 throws
+            // HttpRequestException on non-2xx responses. Without this catch,
+            // an error during initial load crashes the entire component and
+            // the "Unhandled exception rendering component" appears.
+            try
+            {
+                await LoadAsync(reset: true);
+            }
+            catch (Exception ex)
+            {
+                Toast.Error($"Kunde inte ladda journal: {ex.Message}");
+                _loading = false;
+            }
+        }
+        else
+        {
+            _loading = false;
+        }
     }
 
-    // FIX: async void replaced with InvokeAsync wrapper that surfaces exceptions via Toast
+    public void Dispose()
+    {
+        Filter.FilterChanged     -= OnFilterChanged;
+        BudgetState.StateChanged -= OnStateChanged;
+        SignalR.OnBudgetEvent    -= OnSignalR;
+    }
+
+    // FIX: safe fire-and-forget wrapper instead of async void.
     private void OnFilterChanged() => InvokeAsync(async () =>
     {
-        try   { await LoadAsync(true); }
-        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        try   { await LoadAsync(reset: true); }
+        catch (Exception ex) { Toast.Error($"Filterfel: {ex.Message}"); }
         StateHasChanged();
     });
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        try   { await LoadAsync(true); }
-        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        try   { await LoadAsync(reset: true); }
+        catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
         StateHasChanged();
     });
 
@@ -235,15 +305,18 @@
 
         if (reset) { Filter.Query.Page = 1; _entries.Clear(); }
         _loading = true;
+
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
         if (r.HasValue)
         {
-            // FIX: reset replaces the list, LoadMore appends
-            _entries    = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
+            _entries    = reset
+                ? r.Value.Result.Items
+                : _entries.Concat(r.Value.Result.Items).ToList();
             _totalCount = r.Value.Result.TotalCount;
             _totalPages = r.Value.Result.TotalPages;
             _summary    = r.Value.Summary;
         }
+
         _loading = false;
     }
 
@@ -268,8 +341,8 @@
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
-        try   { await LoadAsync(true); }
-        catch (Exception ex) { Toast.Error($"Realtime-uppdatering misslyckades: {ex.Message}"); }
+        try   { await LoadAsync(reset: true); }
+        catch (Exception ex) { Toast.Error($"Realtidsuppdatering misslyckades: {ex.Message}"); }
         await InvokeAsync(StateHasChanged);
     }
 
@@ -277,7 +350,10 @@
     {
         _searchOpen = !_searchOpen;
         if (_searchOpen)
-            await Task.Delay(80).ContinueWith(_ => _searchRef.FocusAsync());
+        {
+            await Task.Delay(80);
+            await _searchRef.FocusAsync();
+        }
     }
 
     private void CloseSearch()
@@ -287,11 +363,15 @@
         Filter.Update(q => { q.FilterByDescription = false; q.Description = null; });
     }
 
-    private void OnSearch() => Filter.Update(q =>
+    private void OnSearchInput(ChangeEventArgs e)
     {
-        q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText);
-        q.Description = _searchText;
-    });
+        _searchText = e.Value?.ToString() ?? "";
+        Filter.Update(q =>
+        {
+            q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText);
+            q.Description         = _searchText;
+        });
+    }
 
     private static string ShortLabel(JournalEntryType t) => t switch
     {
@@ -327,11 +407,4 @@
         "Utbetald"  => "status-dot-info",
         _           => ""
     };
-
-    public void Dispose()
-    {
-        Filter.FilterChanged    -= OnFilterChanged;
-        BudgetState.StateChanged -= OnStateChanged;
-        SignalR.OnBudgetEvent   -= OnSignalR;
-    }
 }

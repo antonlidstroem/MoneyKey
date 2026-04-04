@@ -297,23 +297,30 @@ public class JournalApiService : ApiServiceBase
 {
     public JournalApiService(HttpClient http) : base(http) { }
 
+    // FIX: Use Http.GetAsync + manual status check instead of GetFromJsonAsync.
+    // GetFromJsonAsync in .NET 8 calls EnsureSuccessStatusCode() internally,
+    // so any server error throws HttpRequestException instead of returning null.
+    // Returning null here lets callers treat a server error as "no data" and
+    // show the error state rather than crashing the component.
     public async Task<(PagedResult<JournalEntryDto> Result, SummaryDto Summary)?> GetPagedAsync(
         int budgetId, JournalQuery query)
     {
-        var url  = BuildUrl(budgetId, query);
-        var raw  = await GetAsync<JournalPageResponse>(url);
+        var url = BuildUrl(budgetId, query);
+        var response = await Http.GetAsync(url);
+
+        if (!response.IsSuccessStatusCode)
+            return null;   // caller checks HasValue; no exception thrown
+
+        var raw = await response.Content.ReadFromJsonAsync<JournalPageResponse>();
         return raw == null ? null : (raw.Result, raw.Summary);
     }
 
-    // Export URLs pass the current filter state as query-string params so the
-    // API applies the same filters that are visible in the journal grid.
     public string GetPdfUrl(int budgetId, JournalQuery q) =>
         $"api/budgets/{budgetId}/transactions/export/pdf?{FilterParams(q)}";
 
     public string GetExcelUrl(int budgetId, JournalQuery q) =>
         $"api/budgets/{budgetId}/transactions/export/excel?{FilterParams(q)}";
 
-    // ── URL builder ───────────────────────────────────────────────────────────
     private static string BuildUrl(int budgetId, JournalQuery q)
     {
         var parts = new List<string>
@@ -324,7 +331,6 @@ public class JournalApiService : ApiServiceBase
             $"sortDir={Uri.EscapeDataString(q.SortDir ?? "desc")}"
         };
 
-        // Multi-value params — one key per value as ASP.NET Core expects.
         foreach (var t in q.IncludeTypes)
             parts.Add($"includeTypes={t}");
 
@@ -361,11 +367,12 @@ public class JournalApiService : ApiServiceBase
         return p;
     }
 
-    // Matches the exact JSON shape the JournalController returns.
+    // Property names match the JSON the JournalController returns (camelCase,
+    // case-insensitive deserialization is the ASP.NET Core default).
     private class JournalPageResponse
     {
-        public PagedResult<JournalEntryDto> Result  { get; set; } = new();
-        public SummaryDto                   Summary { get; set; } = new();
+        public PagedResult<JournalEntryDto> Result { get; set; } = new();
+        public SummaryDto Summary { get; set; } = new();
     }
 }
 
