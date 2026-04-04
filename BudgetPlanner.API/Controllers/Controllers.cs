@@ -109,8 +109,6 @@ public class AuthController : BaseApiController
         return Ok(new UserDto(user.Id, user.Email!, user.FirstName, user.LastName, await GetMembershipsAsync(user.Id)));
     }
 
-    // ── FIX: Accept an invitation token. Returns a fresh JWT that includes
-    //         the newly-joined budget so the client state is immediately consistent.
     [HttpPost("accept-invite")]
     [Authorize]
     public async Task<IActionResult> AcceptInvite([FromBody] AcceptInviteDto dto)
@@ -125,7 +123,6 @@ public class AuthController : BaseApiController
         if (membership == null)
             return BadRequest(new { Message = "Ogiltig eller redan använd inbjudningslänk." });
 
-        // Prevent duplicate membership for the same budget.
         var alreadyMember = await _db.BudgetMemberships
             .AnyAsync(m => m.BudgetId == membership.BudgetId
                         && m.UserId   == UserId
@@ -133,13 +130,11 @@ public class AuthController : BaseApiController
         if (alreadyMember)
             return BadRequest(new { Message = "Du är redan medlem i denna budget." });
 
-        // Bind the pending invite row to the authenticated user.
-        membership.UserId     = UserId;
-        membership.AcceptedAt = DateTime.UtcNow;
+        membership.UserId      = UserId;
+        membership.AcceptedAt  = DateTime.UtcNow;
         membership.InviteToken = null;
         await _db.SaveChangesAsync();
 
-        // Issue a new token so the new budget appears in the JWT immediately.
         var user = await _users.FindByIdAsync(UserId);
         if (user == null) return Unauthorized();
         var memberships = await GetMembershipsAsync(UserId);
@@ -156,7 +151,13 @@ public class AuthController : BaseApiController
         var memberships = await GetMembershipsAsync(user.Id);
         var access      = _tokens.GenerateAccessToken(user, memberships);
         var (raw, _)    = await _tokens.GenerateRefreshTokenAsync(user.Id);
-        Response.Cookies.Append(CookieName, raw, new CookieOptions { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Strict, Expires = DateTimeOffset.UtcNow.AddDays(30) });
+        Response.Cookies.Append(CookieName, raw, new CookieOptions
+        {
+            HttpOnly  = true,
+            Secure    = true,
+            SameSite  = SameSiteMode.Strict,
+            Expires   = DateTimeOffset.UtcNow.AddDays(30)
+        });
         return Ok(new AuthResultDto(access, new UserDto(user.Id, user.Email!, user.FirstName, user.LastName, memberships)));
     }
 
@@ -224,6 +225,9 @@ public class BudgetsController : BaseApiController
         return NoContent();
     }
 
+    // FIX: Returns a flat projection instead of the raw BudgetMembership domain objects.
+    // The original returned b.Memberships which includes a Budget navigation property,
+    // creating a Budget→Memberships→Budget circular reference that crashes System.Text.Json.
     [HttpGet("{budgetId:int}/members")]
     public async Task<IActionResult> GetMembers(int budgetId)
     {
@@ -231,7 +235,6 @@ public class BudgetsController : BaseApiController
         var b = await _repo.GetByIdAsync(budgetId);
         if (b == null) return NotFound();
 
-        // FIX: project to a flat DTO — no navigation properties, no circular refs.
         var result = b.Memberships
             .Where(m => m.AcceptedAt != null)
             .Select(m => new
@@ -240,8 +243,8 @@ public class BudgetsController : BaseApiController
                 m.BudgetId,
                 m.UserId,
                 m.Role,
-                m.AcceptedAt,
-                m.InvitedByUserId
+                m.InvitedByUserId,
+                m.AcceptedAt
             })
             .ToList();
 
@@ -284,24 +287,28 @@ public class JournalController : BaseApiController
     public JournalController(JournalQueryService journal, BudgetAuthorizationService auth)
     { _journal = journal; _auth = auth; }
 
+    // FIX: QueryAsync now returns a 3-tuple (items, total, summary).
+    // The summary is computed INSIDE QueryAsync on ALL filtered items before pagination,
+    // so the totals reflect the complete filtered dataset — not just the current page.
+    // The old pattern was:
+    //   var (items, total) = await _journal.QueryAsync(query);
+    //   var summary = _journal.ComputeSummary(items);  // BUG: items already paged
     [HttpGet]
     public async Task<IActionResult> Get(int budgetId, [FromQuery] JournalQuery query)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         query.BudgetId = budgetId;
 
-        // FIX: QueryAsync now returns a 3-tuple — summary is computed on all
-        // filtered items inside the service, before pagination is applied.
         var (items, total, summary) = await _journal.QueryAsync(query);
 
         return Ok(new
         {
             Result = new PagedResult<JournalEntryDto>
             {
-                Items = items,
+                Items      = items,
                 TotalCount = total,
-                Page = query.Page,
-                PageSize = query.PageSize
+                Page       = query.Page,
+                PageSize   = query.PageSize
             },
             Summary = summary
         });
@@ -415,7 +422,10 @@ public class TransactionsController : BaseApiController
         Month = t.Month, Rate = t.Rate, ProjectId = t.ProjectId, ProjectName = t.Project?.Name,
         HasKontering = t.HasKontering, CreatedByUserId = t.CreatedByUserId, CreatedAt = t.CreatedAt,
         KonteringRows = t.KonteringRows.Select(k => new KonteringRowDto
-        { Id = k.Id, KontoNr = k.KontoNr, CostCenter = k.CostCenter, Amount = k.Amount, Percentage = k.Percentage, Description = k.Description }).ToList()
+        {
+            Id = k.Id, KontoNr = k.KontoNr, CostCenter = k.CostCenter,
+            Amount = k.Amount, Percentage = k.Percentage, Description = k.Description
+        }).ToList()
     };
 
     private static Transaction MapFromDto(CreateTransactionDto dto, int budgetId, string userId) => new()
@@ -462,8 +472,6 @@ public class ProjectsController : BaseApiController
     public async Task<IActionResult> GetAll(int budgetId)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
-
-        // FIX: single JOIN query — no N+1
         var withSpent = await _repo.GetForBudgetWithSpentAsync(budgetId);
         var dtos = withSpent.Select(x => Map(x.Project, x.SpentAmount)).ToList();
         return Ok(dtos);
@@ -473,8 +481,7 @@ public class ProjectsController : BaseApiController
     public async Task<IActionResult> GetById(int budgetId, int projectId)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
-        // Use the batch method to get a single project with its spent amount.
-        var all = await _repo.GetForBudgetWithSpentAsync(budgetId);
+        var all   = await _repo.GetForBudgetWithSpentAsync(budgetId);
         var found = all.FirstOrDefault(x => x.Project.Id == projectId);
         if (found.Project == null) return NotFound();
         return Ok(Map(found.Project, found.SpentAmount));
@@ -484,7 +491,12 @@ public class ProjectsController : BaseApiController
     public async Task<IActionResult> Create(int budgetId, [FromBody] CreateProjectDto dto)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
-        var p = await _repo.CreateAsync(new Project { BudgetId = budgetId, Name = dto.Name, Description = dto.Description, BudgetAmount = dto.BudgetAmount, StartDate = dto.StartDate, EndDate = dto.EndDate });
+        var p = await _repo.CreateAsync(new Project
+        {
+            BudgetId     = budgetId,  Name        = dto.Name,
+            Description  = dto.Description, BudgetAmount = dto.BudgetAmount,
+            StartDate    = dto.StartDate,   EndDate      = dto.EndDate
+        });
         await BroadcastAsync(_hub, budgetId, "ProjectCreated", p.Id);
         return CreatedAtAction(nameof(GetById), new { budgetId, projectId = p.Id }, Map(p, 0));
     }
@@ -643,7 +655,13 @@ public class ReceiptsController : BaseApiController
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         query.BudgetId = budgetId;
         var (batches, total) = await _repo.GetPagedAsync(query);
-        return Ok(new PagedResult<ReceiptBatchDto> { Items = batches.Select(Map).ToList(), TotalCount = total, Page = query.Page, PageSize = query.PageSize });
+        return Ok(new PagedResult<ReceiptBatchDto>
+        {
+            Items      = batches.Select(Map).ToList(),
+            TotalCount = total,
+            Page       = query.Page,
+            PageSize   = query.PageSize
+        });
     }
 
     [HttpGet("{batchId:int}")]
@@ -749,20 +767,18 @@ public class ReceiptsController : BaseApiController
         var b = await _repo.GetByIdAsync(batchId, budgetId);
         if (b == null) return NotFound();
         var pdf = _svc.ExportBatchToPdf(b, $"Budget {budgetId}");
-        return File(pdf, "application/pdf", $"utlagg_{b.Label.Replace(" ","_")}_{DateTime.Today:yyyyMMdd}.pdf");
+        return File(pdf, "application/pdf", $"utlagg_{b.Label.Replace(" ", "_")}_{DateTime.Today:yyyyMMdd}.pdf");
     }
 
-    // NOTE: The leading "/" in the route is intentional — it overrides the controller
-    // route prefix and creates an absolute route at /api/budgets/{budgetId}/receipt-categories.
-    // This route is kept as-is because the Blazor client calls this exact URL.
-    // It works correctly in ASP.NET Core; the "/" prefix simply bypasses the
-    // [Route("api/budgets/{budgetId:int}/receipts")] controller prefix.
     [HttpGet("/api/budgets/{budgetId:int}/receipt-categories")]
     public async Task<IActionResult> GetCategories(int budgetId)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         var cats = await _svc.GetCategoriesAsync();
-        return Ok(cats.Select(c => new ReceiptBatchCategoryDto { Id = c.Id, Name = c.Name, IconName = c.IconName, Description = c.Description }));
+        return Ok(cats.Select(c => new ReceiptBatchCategoryDto
+        {
+            Id = c.Id, Name = c.Name, IconName = c.IconName, Description = c.Description
+        }));
     }
 
     private static ReceiptBatchDto Map(ReceiptBatch b) => new()
@@ -787,9 +803,12 @@ public class ReceiptsController : BaseApiController
 
     private static string Swedish(ReceiptBatchStatus s) => s switch
     {
-        ReceiptBatchStatus.Draft => "Utkast", ReceiptBatchStatus.Submitted => "Inskickad",
-        ReceiptBatchStatus.Approved => "Godkänd", ReceiptBatchStatus.Rejected => "Avslagen",
-        ReceiptBatchStatus.Reimbursed => "Utbetald", _ => s.ToString()
+        ReceiptBatchStatus.Draft      => "Utkast",
+        ReceiptBatchStatus.Submitted  => "Inskickad",
+        ReceiptBatchStatus.Approved   => "Godkänd",
+        ReceiptBatchStatus.Rejected   => "Avslagen",
+        ReceiptBatchStatus.Reimbursed => "Utbetald",
+        _                             => s.ToString()
     };
 }
 
@@ -816,7 +835,6 @@ public class ImportController : BaseApiController
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
         if (file == null || file.Length == 0) return BadRequest("Ingen fil uppladdad.");
         await using var stream = file.OpenReadStream();
-        // FIX: pass UserId so sessions are user-scoped
         var session = await _svc.PreviewAsync(stream, bankProfile, budgetId, UserId);
         return Ok(session);
     }
@@ -848,11 +866,25 @@ public class ReportsController : BaseApiController
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
         if (year == 0) year = DateTime.Today.Year;
-        var q = new TransactionQuery { BudgetId = budgetId, FilterByStartDate = true, StartDate = new DateTime(year, 1, 1), FilterByEndDate = true, EndDate = new DateTime(year, 12, 31), PageSize = int.MaxValue };
+        var q = new TransactionQuery
+        {
+            BudgetId          = budgetId,
+            FilterByStartDate = true, StartDate = new DateTime(year, 1, 1),
+            FilterByEndDate   = true, EndDate   = new DateTime(year, 12, 31),
+            PageSize          = int.MaxValue
+        };
         var (txs, _) = await _txRepo.GetPagedAsync(q);
-        var rows = txs.GroupBy(t => t.StartDate.Month)
-            .Select(g => new MonthlyRow { Year = year, Month = g.Key, Income = g.Where(t => t.NetAmount > 0).Sum(t => t.NetAmount), Expenses = g.Where(t => t.NetAmount < 0).Sum(t => t.NetAmount) })
-            .OrderBy(r => r.Month).ToList();
+        var rows = txs
+            .GroupBy(t => t.StartDate.Month)
+            .Select(g => new MonthlyRow
+            {
+                Year     = year,
+                Month    = g.Key,
+                Income   = g.Where(t => t.NetAmount > 0).Sum(t => t.NetAmount),
+                Expenses = g.Where(t => t.NetAmount < 0).Sum(t => t.NetAmount)
+            })
+            .OrderBy(r => r.Month)
+            .ToList();
         return Ok(new MonthlySummary { Rows = rows });
     }
 
@@ -860,9 +892,16 @@ public class ReportsController : BaseApiController
     public async Task<IActionResult> CategoryBreakdown(int budgetId, [FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
         if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
-        var q = new TransactionQuery { BudgetId = budgetId, FilterByStartDate = from.HasValue, StartDate = from, FilterByEndDate = to.HasValue, EndDate = to, PageSize = int.MaxValue };
+        var q = new TransactionQuery
+        {
+            BudgetId          = budgetId,
+            FilterByStartDate = from.HasValue, StartDate = from,
+            FilterByEndDate   = to.HasValue,   EndDate   = to,
+            PageSize          = int.MaxValue
+        };
         var (txs, _) = await _txRepo.GetPagedAsync(q);
-        var breakdown = txs.Where(t => t.NetAmount < 0)
+        var breakdown = txs
+            .Where(t => t.NetAmount < 0)
             .GroupBy(t => t.Category?.Name ?? "Okänd")
             .Select(g => new CategoryBreakdownItem { Category = g.Key, Total = Math.Abs(g.Sum(t => t.NetAmount)) })
             .OrderByDescending(x => x.Total);
@@ -889,8 +928,20 @@ public class AuditController : BaseApiController
         var (items, total) = await _repo.GetPagedAsync(budgetId, page, pageSize);
         return Ok(new PagedResult<AuditLogDto>
         {
-            Items = items.Select(a => new AuditLogDto { Id = a.Id, UserEmail = a.UserEmail, EntityName = a.EntityName, EntityId = a.EntityId, Action = a.Action, OldValues = a.OldValues, NewValues = a.NewValues, Timestamp = a.Timestamp }).ToList(),
-            TotalCount = total, Page = page, PageSize = pageSize
+            Items = items.Select(a => new AuditLogDto
+            {
+                Id         = a.Id,
+                UserEmail  = a.UserEmail,
+                EntityName = a.EntityName,
+                EntityId   = a.EntityId,
+                Action     = a.Action,
+                OldValues  = a.OldValues,
+                NewValues  = a.NewValues,
+                Timestamp  = a.Timestamp
+            }).ToList(),
+            TotalCount = total,
+            Page       = page,
+            PageSize   = pageSize
         });
     }
 }

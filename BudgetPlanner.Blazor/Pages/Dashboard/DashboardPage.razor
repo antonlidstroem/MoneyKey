@@ -8,10 +8,15 @@
 <div class="page-header">
     <span class="page-title">Dashboard</span>
     <div class="header-actions">
-        <select class="form-control" style="width:auto;padding:5px 10px;font-size:.85rem"
-                @bind="_year" @bind:after="LoadAsync">
+        <select class="form-control"
+                style="width:auto;padding:5px 10px;font-size:.85rem"
+                value="@_year"
+                @onchange="OnYearChanged">
             @for (var y = DateTime.Today.Year; y >= DateTime.Today.Year - 3; y--)
-            { <option value="@y">@y</option> }
+            {
+                var yr = y;
+                <option value="@yr">@yr</option>
+            }
         </select>
     </div>
 </div>
@@ -19,21 +24,38 @@
 <div class="page-content" style="display:flex;flex-direction:column;gap:20px">
     @if (_loading)
     {
-        <div style="text-align:center;padding:60px"><div class="spinner"></div></div>
+        <div style="text-align:center;padding:60px">
+            <div class="spinner"></div>
+        </div>
     }
     else if (_loadError != null)
     {
         <div style="text-align:center;padding:60px;color:var(--color-muted)">
             <span class="material-icons" style="font-size:2rem;display:block;margin-bottom:8px">error_outline</span>
             @_loadError
+            <br />
+            <button class="btn btn-secondary btn-sm" style="margin-top:12px" @onclick="LoadAsync">
+                Försök igen
+            </button>
         </div>
     }
     else
     {
         <div class="card-grid">
-            <div class="kpi-card"><div class="kpi-label">Totala inkomster @_year</div><div class="kpi-value income">@_totalIncome.ToString("N0") kr</div></div>
-            <div class="kpi-card"><div class="kpi-label">Totala utgifter @_year</div><div class="kpi-value expense">@_totalExpense.ToString("N0") kr</div></div>
-            <div class="kpi-card"><div class="kpi-label">Netto @_year</div><div class="kpi-value @(_totalIncome+_totalExpense>=0?"income":"expense")">@((_totalIncome+_totalExpense).ToString("N0")) kr</div></div>
+            <div class="kpi-card">
+                <div class="kpi-label">Totala inkomster @_year</div>
+                <div class="kpi-value income">@_totalIncome.ToString("N0") kr</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Totala utgifter @_year</div>
+                <div class="kpi-value expense">@_totalExpense.ToString("N0") kr</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Netto @_year</div>
+                <div class="kpi-value @(_totalIncome + _totalExpense >= 0 ? "income" : "expense")">
+                    @((_totalIncome + _totalExpense).ToString("N0")) kr
+                </div>
+            </div>
         </div>
 
         <div class="card">
@@ -52,31 +74,40 @@
     private int     _year      = DateTime.Today.Year;
     private bool    _loading   = true;
     private string? _loadError;
-    private decimal _totalIncome, _totalExpense;
+    private decimal _totalIncome;
+    private decimal _totalExpense;
 
     protected override async Task OnInitializedAsync()
     {
-        // FIX: subscribe to budget state changes so the dashboard reloads
-        // when MainLayout finishes setting up budgets after login.
+        // Subscribe BEFORE awaiting so budget-switch events are never missed.
         BudgetState.StateChanged += OnStateChanged;
 
         if (BudgetState.ActiveBudgetId > 0)
             await LoadAsync();
         else
-            _loading = false;
+            _loading = false; // wait for OnStateChanged to fire when budgets load
     }
 
-    // FIX: fire-and-forget wrapper — safe for event callbacks.
+    public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
+
     private void OnStateChanged() => InvokeAsync(async () =>
     {
         try   { await LoadAsync(); }
-        catch { /* errors surfaced via _loadError */ }
+        catch { /* surfaced via _loadError */ }
         StateHasChanged();
     });
 
+    private async Task OnYearChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var y))
+        {
+            _year = y;
+            await LoadAsync();
+        }
+    }
+
     private async Task LoadAsync()
     {
-        // FIX: guard — do nothing until a budget is active.
         if (BudgetState.ActiveBudgetId <= 0) return;
 
         _loading   = true;
@@ -85,21 +116,24 @@
 
         try
         {
-            var summary   = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
+            var summary = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
             var breakdown = await ReportsSvc.GetCategoryBreakdownAsync(
-                                BudgetState.ActiveBudgetId,
-                                new DateTime(_year, 1, 1),
-                                new DateTime(_year, 12, 31));
+                BudgetState.ActiveBudgetId,
+                new DateTime(_year, 1, 1),
+                new DateTime(_year, 12, 31));
+
             _loading = false;
-            StateHasChanged();
+            StateHasChanged(); // render KPI cards before invoking JS
 
             if (summary != null)
             {
                 _totalIncome  = summary.Rows.Sum(r => r.Income);
                 _totalExpense = summary.Rows.Sum(r => r.Expenses);
+
                 var months = summary.Rows.Select(r => $"{r.Year}-{r.Month:D2}").ToArray();
                 var inc    = summary.Rows.Select(r => (double)r.Income).ToArray();
                 var exp    = summary.Rows.Select(r => (double)Math.Abs(r.Expenses)).ToArray();
+
                 await JS.InvokeVoidAsync("renderBarChart", "monthly-chart", months, inc, exp);
             }
 
@@ -116,6 +150,4 @@
             _loading   = false;
         }
     }
-
-    public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
 }
