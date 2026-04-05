@@ -1,64 +1,156 @@
-@* ── PROJECTS ────────────────────────────────────────────────────────────────── *@
 @page "/projects"
 @attribute [Authorize]
+@implements IDisposable
 @inject ProjectService ProjectSvc
 @inject ToastService Toast
 @inject BudgetState BudgetState
 @inject NavigationManager Nav
 
-<div class="page-header">
-    <span class="page-title">Projekt</span>
-    <div class="header-actions">
-        @if (BudgetState.CanEdit)
+<!-- ── DESKTOP ─────────────────────────────────────────────────────────────── -->
+<div class="desktop-page-wrapper">
+    <div class="page-header">
+        <span class="page-title">Projekt</span>
+        <div class="header-actions">
+            @if (BudgetState.CanEdit)
+            {
+                <button class="btn btn-primary btn-sm" @onclick='() => _showCreate = true'>
+                    <span class="material-icons" style="font-size:.9rem">add</span> Nytt projekt
+                </button>
+            }
+        </div>
+    </div>
+    <div class="page-content">
+        @if (_loading) { <div style="text-align:center;padding:40px"><div class="spinner"></div></div> }
+        else
         {
-            <button class="btn btn-primary btn-sm" @onclick="() => _showCreate = true">
-                <span class="material-icons" style="font-size:.9rem">add</span> Nytt projekt
-            </button>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+                @foreach (var p in _projects)
+                {
+                    <div class="card">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                            <span style="font-weight:500;font-size:.95rem">@p.Name</span>
+                            <span class="badge @(p.IsActive?"badge-income":"badge-muted")" style="font-size:.72rem">
+                                @(p.IsActive ? "Aktiv" : "Inaktiv")
+                            </span>
+                        </div>
+                        @if (p.Description != null)
+                        {
+                            <p style="font-size:.85rem;color:var(--color-muted);margin-bottom:8px">@p.Description</p>
+                        }
+                        <div style="height:6px;background:var(--color-border);border-radius:3px;margin-bottom:8px;overflow:hidden">
+                            <div style="height:100%;width:@(Math.Min(100,p.ProgressPercent))%;background:@(p.ProgressPercent>90?"var(--color-expense)":"var(--color-income)");transition:width .3s"></div>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;font-size:.8rem;color:var(--color-muted)">
+                            <span>Spenderat: @p.SpentAmount.ToString("N0") kr</span>
+                            <span>Budget: @p.BudgetAmount.ToString("N0") kr</span>
+                        </div>
+                    </div>
+                }
+            </div>
         }
     </div>
 </div>
-<div class="page-content">
-    @if (_loading) { <div style="text-align:center;padding:40px"><div class="spinner"></div></div> }
-    else
-    {
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+
+<!-- ── MOBILE ──────────────────────────────────────────────────────────────── -->
+<div class="mobile-page-shell">
+    <div class="mobile-topbar">
+        <span class="mobile-title">Projekt</span>
+        @if (BudgetState.CanEdit)
+        {
+            <button class="mobile-icon-btn" @onclick='() => _showCreate = true'>
+                <span class="material-icons">add</span>
+            </button>
+        }
+    </div>
+
+    <div class="mobile-page-scroll">
+        @if (_loading)
+        {
+            <div style="text-align:center;padding:40px"><div class="spinner"></div></div>
+        }
+        else if (!_projects.Any())
+        {
+            <div style="text-align:center;padding:48px 24px;color:var(--color-muted)">
+                <span class="material-icons" style="font-size:2.5rem;display:block;margin-bottom:8px">folder_open</span>
+                Inga projekt skapade
+            </div>
+        }
+        else
+        {
             @foreach (var p in _projects)
             {
-                <div class="card">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-                        <span style="font-weight:500;font-size:.95rem">@p.Name</span>
-                        <span class="badge @(p.IsActive?"badge-income":"badge-muted")" style="font-size:.72rem">@(p.IsActive?"Aktiv":"Inaktiv")</span>
+                <div class="mobile-entry-card">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">
+                        <span style="font-weight:500;font-size:.92rem;color:var(--color-dark)">@p.Name</span>
+                        <span class="badge @(p.IsActive?"badge-income":"badge-muted")" style="font-size:.68rem;flex-shrink:0;margin-left:8px">
+                            @(p.IsActive ? "Aktiv" : "Inaktiv")
+                        </span>
                     </div>
-                    @if (p.Description != null) { <p style="font-size:.85rem;color:var(--color-muted);margin-bottom:8px">@p.Description</p> }
-                    <div style="background:var(--color-bg);border-radius:6px;height:6px;margin-bottom:8px;overflow:hidden">
-                        <div style="height:100%;width:@(Math.Min(100,p.ProgressPercent))%;background:@(p.ProgressPercent>90?"var(--color-expense)":"var(--color-income)");transition:width .3s"></div>
+                    @if (p.Description != null)
+                    {
+                        <div class="mobile-entry-card-meta" style="margin-bottom:6px">@p.Description</div>
+                    }
+                    <div class="mobile-progress-bar">
+                        <div class="mobile-progress-fill"
+                             style="width:@(Math.Min(100, p.ProgressPercent))%;background:@(p.ProgressPercent>90?"var(--color-expense)":"var(--color-income)")">
+                        </div>
                     </div>
-                    <div style="display:flex;justify-content:space-between;font-size:.8rem;color:var(--color-muted)">
-                        <span>Spenderat: @p.SpentAmount.ToString("N0") kr</span>
-                        <span>Budget: @p.BudgetAmount.ToString("N0") kr</span>
+                    <div style="display:flex;justify-content:space-between;font-size:.78rem;color:var(--color-muted)">
+                        <span>Spenderat @p.SpentAmount.ToString("N0") kr</span>
+                        <span>Budget @p.BudgetAmount.ToString("N0") kr</span>
                     </div>
                 </div>
             }
-        </div>
+        }
+    </div>
+
+    @if (BudgetState.CanEdit)
+    {
+        <button class="mobile-fab" @onclick='() => _showCreate = true'>
+            <span class="material-icons">add</span>
+        </button>
     }
 </div>
 
 @if (_showCreate)
 {
-    <div class="modal-overlay" @onclick="() => _showCreate = false">
+    <div class="modal-overlay" @onclick='() => _showCreate = false'>
         <div class="modal" @onclick:stopPropagation>
             <div class="modal-header"><span class="modal-title">Nytt projekt</span></div>
             <div class="modal-body">
-                <div class="form-group"><label class="form-label">Namn *</label><input class="form-control" @bind="_newName" /></div>
-                <div class="form-group"><label class="form-label">Budget (kr)</label><input class="form-control" type="number" @bind="_newBudget" /></div>
+                <div class="form-group">
+                    <label class="form-label">Namn *</label>
+                    <input class="form-control" @bind="_newName" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Beskrivning</label>
+                    <input class="form-control" @bind="_newDesc" placeholder="Valfri beskrivning..." />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Budget (kr)</label>
+                    <input class="form-control" type="number" @bind="_newBudget" />
+                </div>
                 <div class="form-row">
-                    <div class="form-group"><label class="form-label">Startdatum</label><input class="form-control" type="date" value="@_newStart.ToString("yyyy-MM-dd")" @onchange="e => _newStart = DateTime.Parse(e.Value!.ToString()!)" /></div>
-                    <div class="form-group"><label class="form-label">Slutdatum</label><input class="form-control" type="date" /></div>
+                    <div class="form-group">
+                        <label class="form-label">Startdatum</label>
+                        <input class="form-control" type="date"
+                               value="@_newStart.ToString("yyyy-MM-dd")"
+                               @onchange='e => _newStart = DateTime.Parse(e.Value!.ToString()!)' />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Slutdatum</label>
+                        <input class="form-control" type="date"
+                               value="@(_newEnd?.ToString("yyyy-MM-dd") ?? "")"
+                               @onchange="OnEndDateChanged" />
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" @onclick="() => _showCreate = false">Avbryt</button>
-                <button class="btn btn-primary" @onclick="CreateAsync">Skapa</button>
+                <button class="btn btn-secondary" @onclick='() => _showCreate = false'>Avbryt</button>
+                <button class="btn btn-primary" @onclick="CreateAsync" disabled="@_saving">
+                    @if (_saving) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                    Skapa
+                </button>
             </div>
         </div>
     </div>
@@ -66,19 +158,62 @@
 
 @code {
     private List<ProjectDto> _projects = new();
-    private bool _loading = true, _showCreate;
-    private string _newName = "";
-    private decimal _newBudget;
-    private DateTime _newStart = DateTime.Today;
+    private bool      _loading = true, _showCreate, _saving;
+    private string    _newName = "";
+    private string?   _newDesc;
+    private decimal   _newBudget;
+    private DateTime  _newStart = DateTime.Today;
+    private DateTime? _newEnd;
 
-    protected override async Task OnInitializedAsync() { var r = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId); _projects = r ?? new(); _loading = false; }
+    protected override async Task OnInitializedAsync()
+    {
+        // BUG 4 FIX: subscribe before data load so budget switches reload the list.
+        BudgetState.StateChanged += OnStateChanged;
+        await ReloadAsync();
+    }
+
+    public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        try   { await ReloadAsync(); }
+        catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
+        StateHasChanged();
+    });
+
+    private async Task ReloadAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) { _loading = false; return; }
+        _loading  = true;
+        var r     = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId);
+        _projects = r ?? new();
+        _loading  = false;
+    }
+
+    // Safe end-date parsing: empty input clears the field; invalid input is ignored.
+    private void OnEndDateChanged(ChangeEventArgs e)
+    {
+        var raw = e.Value?.ToString();
+        if (string.IsNullOrEmpty(raw))
+            _newEnd = null;
+        else if (DateTime.TryParse(raw, out var d))
+            _newEnd = d;
+        // If TryParse fails (shouldn't happen with <input type="date">) we leave _newEnd unchanged.
+    }
 
     private async Task CreateAsync()
     {
         if (string.IsNullOrWhiteSpace(_newName)) return;
-        await ProjectSvc.CreateAsync(BudgetState.ActiveBudgetId, new CreateProjectDto(_newName, null, _newBudget, _newStart, null));
-        Toast.Success("Projekt skapat.");
-        _showCreate = false; _newName = "";
-        var r = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId); _projects = r ?? new();
+        _saving = true;
+        try
+        {
+            await ProjectSvc.CreateAsync(BudgetState.ActiveBudgetId,
+                new CreateProjectDto(_newName, _newDesc, _newBudget, _newStart, _newEnd));
+            Toast.Success("Projekt skapat.");
+            _showCreate = false; _newName = ""; _newDesc = null; _newBudget = 0;
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _saving = false; }
     }
 }

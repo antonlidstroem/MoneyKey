@@ -297,3 +297,221 @@
     animation: shimmer 1.3s infinite;
 }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE ADDITIONS — append to the end of wwwroot/css/mobile.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── BOTTOM NAVIGATION BAR ─────────────────────────────────────────────────── */
+.mobile-bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--color-surface);
+    border-top: 0.5px solid var(--color-border);
+    z-index: 200;
+    align-items: stretch;
+}
+
+.mobile-nav-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: .62rem;
+    font-weight: 500;
+    color: var(--color-muted);
+    text-decoration: none;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    transition: color .15s;
+    padding: 0;
+    -webkit-tap-highlight-color: transparent;
+}
+
+    .mobile-nav-tab .material-icons {
+        font-size: 1.3rem;
+    }
+
+    .mobile-nav-tab.active,
+    .mobile-nav-tab:active {
+        color: var(--color-primary);
+    }
+
+/* ── MER SHEET — nav items ─────────────────────────────────────────────────── */
+.more-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    font-size: .9rem;
+    color: var(--color-dark);
+    text-decoration: none;
+    border-bottom: 0.5px solid var(--color-border);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+    .more-nav-item:active {
+        background: var(--color-bg);
+    }
+
+    .more-nav-item .material-icons {
+        font-size: 1.2rem;
+        color: var(--color-muted);
+        width: 24px;
+    }
+
+/* ── MOBILE PAGE SHELL (for all non-journal pages) ─────────────────────────── */
+.mobile-page-shell {
+    display: none;
+    flex-direction: column;
+    /* 56px = bottom nav height. Shell fills viewport minus nav. */
+    height: calc(100vh - 56px);
+    overflow: hidden;
+}
+
+.mobile-page-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    /* Extra bottom padding so last item isn't obscured by the fixed nav bar */
+    padding: 12px 14px calc(56px + 16px);
+}
+/* Desktop wrapper — hidden on mobile */
+.desktop-page-wrapper {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* ── GLOBAL MOBILE OVERRIDES ──────────────────────────────────────────────── */
+@media (max-width: 767px) {
+    .main-area {
+        overflow-y: auto;
+    }
+
+    /* Bottom nav visible */
+    .mobile-bottom-nav {
+        display: flex;
+    }
+
+    /* Mobile page shells appear; desktop wrappers hide */
+    .mobile-page-shell {
+        display: flex;
+    }
+
+    .desktop-page-wrapper {
+        display: none !important;
+    }
+
+    /*
+     * BUG 6 FIX — FAB position:
+     * The bottom nav is position:fixed at bottom:0, height:56px.
+     * The FAB was at bottom:20px which placed it behind the nav bar.
+     * Move it above: 56px (nav) + 16px (gap) = 72px.
+     */
+    .mobile-fab {
+        bottom: 72px !important;
+    }
+
+    /*
+     * BUG 6 FIX — mobile-list bottom padding:
+     * Without padding the last list row scrolls behind the fixed nav bar.
+     * Add enough padding for the nav (56px) plus a comfortable gap (16px).
+     */
+    .mobile-list {
+        padding-bottom: 72px;
+    }
+}
+
+/* ── MOBILE CARD — generic entry card ──────────────────────────────────────── */
+.mobile-entry-card {
+    background: var(--color-surface);
+    border: 0.5px solid var(--color-border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+}
+
+.mobile-entry-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+
+.mobile-entry-card-title {
+    font-size: .9rem;
+    font-weight: 500;
+    color: var(--color-dark);
+}
+
+.mobile-entry-card-amount {
+    font-size: .95rem;
+    font-weight: 700;
+}
+
+.mobile-entry-card-meta {
+    font-size: .78rem;
+    color: var(--color-muted);
+    margin-top: 2px;
+}
+
+/* ── PROJECT PROGRESS ───────────────────────────────────────────────────────── */
+.mobile-progress-bar {
+    height: 5px;
+    background: var(--color-border);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 8px 0 4px;
+}
+
+.mobile-progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width .3s;
+}
+
+/* ── RECEIPT LINE ───────────────────────────────────────────────────────────── */
+.mobile-receipt-line {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 0.5px solid var(--color-border);
+    gap: 12px;
+}
+
+    .mobile-receipt-line:last-child {
+        border-bottom: none;
+    }
+
+.mobile-receipt-ref {
+    font-family: monospace;
+    font-size: .78rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    letter-spacing: .5px;
+}
+
+/* ── INLINE CONFIRM ─────────────────────────────────────────────────────────── */
+.mobile-inline-confirm {
+    background: var(--color-expense-bg);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin: 0 16px 12px;
+}
+
+    .mobile-inline-confirm p {
+        font-size: .875rem;
+        color: var(--color-expense);
+        margin-bottom: 10px;
+    }

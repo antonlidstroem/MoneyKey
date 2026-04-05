@@ -1,117 +1,193 @@
 @page "/receipts"
 @attribute [Authorize]
+@implements IDisposable
 @inject ReceiptApiService ReceiptSvc
 @inject ToastService Toast
 @inject BudgetState BudgetState
 @inject NavigationManager Nav
 
-<div class="page-header">
-    <span class="page-title">Kvittounderlag</span>
-    <div class="header-actions">
-        @if (BudgetState.CanEdit)
+<!-- ── DESKTOP ─────────────────────────────────────────────────────────────── -->
+<div class="desktop-page-wrapper">
+    <div class="page-header">
+        <span class="page-title">Kvittounderlag</span>
+        <div class="header-actions">
+            @if (BudgetState.CanEdit)
+            {
+                <button class="btn btn-primary btn-sm" @onclick='() => _showCreate = true'>
+                    <span class="material-icons" style="font-size:.9rem">add</span> Nytt underlag
+                </button>
+            }
+        </div>
+    </div>
+    <div class="page-content">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn btn-sm @(_sf == null ? "btn-primary" : "btn-secondary")"
+                    @onclick="() => SetFilter(null)">Alla</button>
+            @foreach (var s in Enum.GetValues<ReceiptBatchStatus>())
+            {
+                var status = s;
+                <button class="btn btn-sm @(_sf == status ? "btn-primary" : "btn-secondary")"
+                        @onclick="() => SetFilter(status)">@Sw(status)</button>
+            }
+        </div>
+        <div class="grid-container">
+            <table style="width:100%;border-collapse:collapse" class="quickgrid">
+                <thead>
+                    <tr>
+                        <th>Etikett</th><th>Kategori</th><th>Projekt</th>
+                        <th style="text-align:right">Kvitton</th>
+                        <th style="text-align:right">Totalt</th>
+                        <th>Status</th><th>Skapad av</th><th>Datum</th>
+                        <th style="width:40px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (_loading)
+                    {
+                        <tr><td colspan="9" style="text-align:center;padding:32px"><div class="spinner"></div></td></tr>
+                    }
+                    else if (!_batches.Any())
+                    {
+                        <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--color-muted)">
+                            Inga kvittounderlag @(_sf.HasValue ? $"med status \"{Sw(_sf.Value)}\"" : "ännu").</td></tr>
+                    }
+                    else
+                    {
+                        @foreach (var b in _batches)
+                        {
+                            var batch = b;
+                            <tr style="cursor:pointer" @onclick='() => Nav.NavigateTo($"/receipts/{batch.Id}")'>
+                                <td style="font-weight:500">@batch.Label</td>
+                                <td style="font-size:.85rem">
+                                    @if (batch.BatchCategoryIcon != null)
+                                    {
+                                        <span class="material-icons" style="font-size:1rem;vertical-align:middle;margin-right:3px">@batch.BatchCategoryIcon</span>
+                                    }
+                                    @batch.BatchCategoryName
+                                </td>
+                                <td style="font-size:.85rem;color:var(--color-muted)">@(batch.ProjectName ?? "–")</td>
+                                <td style="text-align:right;font-size:.85rem;color:var(--color-muted)">@batch.LineCount st</td>
+                                <td style="text-align:right;font-weight:600">@batch.TotalAmount.ToString("N2") kr</td>
+                                <td><span class="badge @SBadge(batch.Status)" style="font-size:.72rem">@batch.StatusLabel</span></td>
+                                <td style="font-size:.8rem;color:var(--color-muted)">@(batch.CreatedByEmail ?? "–")</td>
+                                <td style="font-size:.8rem;color:var(--color-muted)">@batch.CreatedAt.ToString("yyyy-MM-dd")</td>
+                                <td @onclick:stopPropagation>
+                                    <button class="btn btn-ghost btn-icon btn-sm"
+                                            @onclick='() => Nav.NavigateTo($"/receipts/{batch.Id}")'>
+                                        <span class="material-icons" style="font-size:.9rem">open_in_new</span>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_totalPages > 1)
         {
-            <button class="btn btn-primary btn-sm" @onclick="() => _showCreate = true">
-                <span class="material-icons" style="font-size:.9rem">add</span> Nytt underlag
-            </button>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--color-border)">
+                <span style="font-size:.8rem;color:var(--color-muted)">@_totalCount underlag · sida @_page av @_totalPages</span>
+                <div style="display:flex;gap:3px">
+                    <button class="btn btn-secondary btn-sm" @onclick="PrevPage" disabled="@(_page<=1)">‹</button>
+                    @for (var p = Math.Max(1, _page - 2); p <= Math.Min(_totalPages, _page + 2); p++)
+                    {
+                        var pg = p;
+                        <button class="btn btn-sm @(pg==_page?"btn-primary":"btn-secondary")" @onclick="() => GoPage(pg)">@pg</button>
+                    }
+                    <button class="btn btn-secondary btn-sm" @onclick="NextPage" disabled="@(_page>=_totalPages)">›</button>
+                </div>
+            </div>
         }
     </div>
 </div>
 
-<div class="page-content">
-    @* FIX: status filter chips now drive a server-side query, not client-side Where() *@
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-        <button class="btn btn-sm @(_sf == null ? "btn-primary" : "btn-secondary")"
-                @onclick="() => SetFilter(null)">Alla</button>
+<!-- ── MOBILE ──────────────────────────────────────────────────────────────── -->
+<div class="mobile-page-shell">
+    <div class="mobile-topbar">
+        <span class="mobile-title">Kvittounderlag</span>
+        @if (BudgetState.CanEdit)
+        {
+            <button class="mobile-icon-btn" @onclick='() => _showCreate = true'>
+                <span class="material-icons">add</span>
+            </button>
+        }
+    </div>
+
+    <div class="mobile-chips" style="border-bottom:.5px solid var(--color-border)">
+        <button class="mobile-chip @(_sf == null ? "active" : "")" @onclick="() => SetFilter(null)">Alla</button>
         @foreach (var s in Enum.GetValues<ReceiptBatchStatus>())
         {
             var status = s;
-            <button class="btn btn-sm @(_sf == status ? "btn-primary" : "btn-secondary")"
+            <button class="mobile-chip @(_sf == status ? "active" : "")"
                     @onclick="() => SetFilter(status)">@Sw(status)</button>
         }
     </div>
 
-    <div class="grid-container">
-        <table style="width:100%;border-collapse:collapse" class="quickgrid">
-            <thead>
-                <tr>
-                    <th>Etikett</th>
-                    <th>Kategori</th>
-                    <th>Projekt</th>
-                    <th style="text-align:right">Kvitton</th>
-                    <th style="text-align:right">Totalt</th>
-                    <th>Status</th>
-                    <th>Skapad av</th>
-                    <th>Datum</th>
-                    <th style="width:40px"></th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (_loading)
-                {
-                    <tr><td colspan="9" style="text-align:center;padding:32px"><div class="spinner"></div></td></tr>
-                }
-                else if (!_batches.Any())
-                {
-                    <tr><td colspan="9" style="text-align:center;padding:32px;color:var(--color-muted)">
-                        Inga kvittounderlag @(_sf.HasValue ? $"med status \"{Sw(_sf.Value)}\"" : "ännu").</td></tr>
-                }
-                else
-                {
-                    @foreach (var b in _batches)
-                    {
-                        var batch = b;
-                        <tr style="cursor:pointer" @onclick='() => Nav.NavigateTo($"/receipts/{batch.Id}")'>
-                            <td style="font-weight:500">@batch.Label</td>
-                            <td style="font-size:.85rem">
+    <div class="mobile-page-scroll">
+        @if (_loading)
+        {
+            <div style="text-align:center;padding:40px"><div class="spinner"></div></div>
+        }
+        else if (!_batches.Any())
+        {
+            <div style="text-align:center;padding:48px 24px;color:var(--color-muted)">
+                <span class="material-icons" style="font-size:2.5rem;display:block;margin-bottom:8px">receipt_long</span>
+                Inga underlag @(_sf.HasValue ? $"med status \"{Sw(_sf.Value)}\"" : "ännu")
+            </div>
+        }
+        else
+        {
+            @foreach (var b in _batches)
+            {
+                var batch = b;
+                <div class="mobile-entry-card" @onclick='() => Nav.NavigateTo($"/receipts/{batch.Id}")'>
+                    <div class="mobile-entry-card-header">
+                        <div style="flex:1;min-width:0">
+                            <div class="mobile-entry-card-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                                 @if (batch.BatchCategoryIcon != null)
                                 {
-                                    <span class="material-icons" style="font-size:1rem;vertical-align:middle;margin-right:3px">@batch.BatchCategoryIcon</span>
+                                    <span class="material-icons" style="font-size:.9rem;vertical-align:middle;margin-right:3px;color:var(--color-muted)">@batch.BatchCategoryIcon</span>
                                 }
+                                @batch.Label
+                            </div>
+                            <div class="mobile-entry-card-meta">
                                 @batch.BatchCategoryName
-                            </td>
-                            <td style="font-size:.85rem;color:var(--color-muted)">@(batch.ProjectName ?? "–")</td>
-                            <td style="text-align:right;font-size:.85rem;color:var(--color-muted)">@batch.LineCount st</td>
-                            <td style="text-align:right;font-weight:600">@batch.TotalAmount.ToString("N2") kr</td>
-                            <td><span class="badge @SBadge(batch.Status)" style="font-size:.72rem">@batch.StatusLabel</span></td>
-                            <td style="font-size:.8rem;color:var(--color-muted)">@(batch.CreatedByEmail ?? "–")</td>
-                            <td style="font-size:.8rem;color:var(--color-muted)">@batch.CreatedAt.ToString("yyyy-MM-dd")</td>
-                            <td @onclick:stopPropagation>
-                                <button class="btn btn-ghost btn-icon btn-sm"
-                                        @onclick='() => Nav.NavigateTo($"/receipts/{batch.Id}")'>
-                                    <span class="material-icons" style="font-size:.9rem">open_in_new</span>
-                                </button>
-                            </td>
-                        </tr>
-                    }
-                }
-            </tbody>
-        </table>
+                                @if (batch.ProjectName != null) { <span> · @batch.ProjectName</span> }
+                                · @batch.LineCount kv. · @batch.CreatedAt.ToString("yyyy-MM-dd")
+                            </div>
+                        </div>
+                        <div style="text-align:right;flex-shrink:0;margin-left:10px">
+                            <div class="mobile-entry-card-amount">@batch.TotalAmount.ToString("N0") kr</div>
+                            <span class="badge @SBadge(batch.Status)" style="font-size:.67rem;margin-top:3px;display:inline-block">
+                                @batch.StatusLabel
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (_totalPages > 1)
+            {
+                <div style="display:flex;justify-content:center;gap:6px;padding:16px 0">
+                    <button class="btn btn-secondary btn-sm" @onclick="PrevPage" disabled="@(_page<=1)">‹</button>
+                    <span style="font-size:.8rem;color:var(--color-muted);align-self:center">@_page / @_totalPages</span>
+                    <button class="btn btn-secondary btn-sm" @onclick="NextPage" disabled="@(_page>=_totalPages)">›</button>
+                </div>
+            }
+        }
     </div>
 
-    @* Pagination *@
-    @if (_totalPages > 1)
+    @if (BudgetState.CanEdit)
     {
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--color-border)">
-            <span style="font-size:.8rem;color:var(--color-muted)">
-                @_totalCount underlag · sida @_page av @_totalPages
-            </span>
-            <div style="display:flex;gap:3px">
-                <button class="btn btn-secondary btn-sm" @onclick="PrevPage" disabled="@(_page <= 1)">‹</button>
-                @for (var p = Math.Max(1, _page - 2); p <= Math.Min(_totalPages, _page + 2); p++)
-                {
-                    var pg = p;
-                    <button class="btn btn-sm @(pg == _page ? "btn-primary" : "btn-secondary")"
-                            @onclick="() => GoPage(pg)">@pg</button>
-                }
-                <button class="btn btn-secondary btn-sm" @onclick="NextPage" disabled="@(_page >= _totalPages)">›</button>
-            </div>
-        </div>
+        <button class="mobile-fab" @onclick='() => _showCreate = true'>
+            <span class="material-icons">add</span>
+        </button>
     }
 </div>
 
 @if (_showCreate)
 {
-    <div class="modal-overlay" @onclick="() => _showCreate = false">
+    <div class="modal-overlay" @onclick='() => _showCreate = false'>
         <div class="modal" @onclick:stopPropagation>
             <div class="modal-header"><span class="modal-title">Nytt kvittounderlag</span></div>
             <div class="modal-body">
@@ -131,8 +207,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" @onclick="() => _showCreate = false">Avbryt</button>
-                <button class="btn btn-primary" @onclick="CreateAsync" disabled="@_creating">
+                <button class="btn btn-secondary" @onclick='() => _showCreate = false'>Avbryt</button>
+                <button class="btn btn-primary" @onclick="CreateBatchAsync" disabled="@_creating">
                     @if (_creating) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
                     Skapa
                 </button>
@@ -152,23 +228,36 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // BUG 5 FIX: subscribe before data load so budget switches reload the list.
+        BudgetState.StateChanged += OnStateChanged;
         var c = await ReceiptSvc.GetCategoriesAsync(BudgetState.ActiveBudgetId);
         _cats = c ?? new();
-        await LoadAsync();
+        await ReloadAsync();
     }
 
-    // FIX: pass status filter and page to the API — no more client-side Where()
-    private async Task LoadAsync()
+    public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
+
+    private void OnStateChanged() => InvokeAsync(async () =>
     {
+        try
+        {
+            // Re-fetch categories too — they may differ between budgets.
+            var c = await ReceiptSvc.GetCategoriesAsync(BudgetState.ActiveBudgetId);
+            _cats = c ?? new();
+            _page = 1; // reset to first page on budget switch
+            await ReloadAsync();
+        }
+        catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
+        StateHasChanged();
+    });
+
+    private async Task ReloadAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) { _loading = false; return; }
         _loading = true;
         try
         {
-            var r = await ReceiptSvc.GetAllAsync(
-                BudgetState.ActiveBudgetId,
-                page:      _page,
-                pageSize:  _pageSize,
-                status:    _sf);
-
+            var r       = await ReceiptSvc.GetAllAsync(BudgetState.ActiveBudgetId, _page, _pageSize, _sf);
             _batches    = r?.Items ?? new();
             _totalCount = r?.TotalCount ?? 0;
             _totalPages = r?.TotalPages ?? 1;
@@ -176,24 +265,18 @@
         finally { _loading = false; }
     }
 
-    private async Task SetFilter(ReceiptBatchStatus? s)
-    {
-        _sf = s; _page = 1;
-        await LoadAsync();
-    }
+    private async Task SetFilter(ReceiptBatchStatus? s) { _sf = s; _page = 1; await ReloadAsync(); }
+    private async Task PrevPage()    { _page--; await ReloadAsync(); }
+    private async Task NextPage()    { _page++; await ReloadAsync(); }
+    private async Task GoPage(int p) { _page = p; await ReloadAsync(); }
 
-    private async Task PrevPage() { _page--; await LoadAsync(); }
-    private async Task NextPage() { _page++; await LoadAsync(); }
-    private async Task GoPage(int p) { _page = p; await LoadAsync(); }
-
-    private async Task CreateAsync()
+    private async Task CreateBatchAsync()
     {
         if (string.IsNullOrWhiteSpace(_newLabel) || _newCatId == 0) return;
         _creating = true;
         try
         {
-            var b = await ReceiptSvc.CreateAsync(
-                BudgetState.ActiveBudgetId,
+            var b = await ReceiptSvc.CreateAsync(BudgetState.ActiveBudgetId,
                 new CreateReceiptBatchDto(_newLabel, _newCatId, null));
             if (b != null)
             {

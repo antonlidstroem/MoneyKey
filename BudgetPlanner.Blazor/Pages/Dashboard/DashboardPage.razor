@@ -5,32 +5,58 @@
 @inject BudgetState BudgetState
 @inject IJSRuntime JS
 
-<div class="page-header">
-    <span class="page-title">Dashboard</span>
-    <div class="header-actions">
+<!--
+    BUG 1 FIX — duplicate chart IDs.
+
+    The original code called DashboardContent() twice (once inside
+    .desktop-page-wrapper, once inside .mobile-page-shell). Both calls
+    rendered <div id="monthly-chart"> and <div id="category-chart">.
+    document.getElementById() always returns the FIRST match in the DOM,
+    which was the desktop div (display:none on mobile). Charts rendered
+    into an invisible element; the mobile chart containers stayed blank.
+
+    Fix: only the navigation HEADER is duplicated per breakpoint.
+    The content (KPI cards + chart divs) is rendered ONCE below both
+    headers. The content div is always in the DOM and always has unique IDs.
+    CSS makes the correct header visible for each breakpoint.
+-->
+
+<!-- ── DESKTOP HEADER (hidden on mobile) ──────────────────────────────────── -->
+<div class="desktop-page-wrapper" style="flex:0;overflow:visible">
+    <div class="page-header">
+        <span class="page-title">Dashboard</span>
+        <div class="header-actions">
+            <select class="form-control" style="width:auto;padding:5px 10px;font-size:.85rem"
+                    value="@_year" @onchange="OnYearChanged">
+                @for (var y = DateTime.Today.Year; y >= DateTime.Today.Year - 3; y--)
+                { var yr = y; <option value="@yr">@yr</option> }
+            </select>
+        </div>
+    </div>
+</div>
+
+<!-- ── MOBILE HEADER (hidden on desktop) ──────────────────────────────────── -->
+<div class="mobile-page-shell" style="height:auto;flex:0;overflow:visible">
+    <div class="mobile-topbar">
+        <span class="mobile-title">Dashboard</span>
         <select class="form-control"
-                style="width:auto;padding:5px 10px;font-size:.85rem"
-                value="@_year"
-                @onchange="OnYearChanged">
+                style="width:80px;padding:4px 6px;font-size:.8rem;background:transparent;border-color:var(--color-border)"
+                value="@_year" @onchange="OnYearChanged">
             @for (var y = DateTime.Today.Year; y >= DateTime.Today.Year - 3; y--)
-            {
-                var yr = y;
-                <option value="@yr">@yr</option>
-            }
+            { var yr = y; <option value="@yr">@yr</option> }
         </select>
     </div>
 </div>
 
-<div class="page-content" style="display:flex;flex-direction:column;gap:20px">
+<!-- ── CONTENT — rendered ONCE, always in DOM, chart IDs are unique ────────── -->
+<div class="page-content dashboard-content" style="overflow-y:auto;flex:1;padding-bottom:72px">
     @if (_loading)
     {
-        <div style="text-align:center;padding:60px">
-            <div class="spinner"></div>
-        </div>
+        <div style="text-align:center;padding:60px"><div class="spinner"></div></div>
     }
     else if (_loadError != null)
     {
-        <div style="text-align:center;padding:60px;color:var(--color-muted)">
+        <div style="text-align:center;padding:40px;color:var(--color-muted)">
             <span class="material-icons" style="font-size:2rem;display:block;margin-bottom:8px">error_outline</span>
             @_loadError
             <br />
@@ -41,7 +67,7 @@
     }
     else
     {
-        <div class="card-grid">
+        <div class="card-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
             <div class="kpi-card">
                 <div class="kpi-label">Totala inkomster @_year</div>
                 <div class="kpi-value income">@_totalIncome.ToString("N0") kr</div>
@@ -58,14 +84,16 @@
             </div>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-top:16px">
             <div class="card-title">Månadsutveckling @_year</div>
-            <div id="monthly-chart" style="height:280px"></div>
+            <!-- Single chart div with unique ID — only exists once in the DOM -->
+            <div id="monthly-chart" style="height:240px"></div>
         </div>
 
-        <div class="card">
+        <div class="card" style="margin-top:16px">
             <div class="card-title">Utgifter per kategori</div>
-            <div id="category-chart" style="height:260px"></div>
+            <!-- Single chart div with unique ID — only exists once in the DOM -->
+            <div id="category-chart" style="height:240px"></div>
         </div>
     }
 </div>
@@ -79,13 +107,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe BEFORE awaiting so budget-switch events are never missed.
         BudgetState.StateChanged += OnStateChanged;
-
         if (BudgetState.ActiveBudgetId > 0)
             await LoadAsync();
         else
-            _loading = false; // wait for OnStateChanged to fire when budgets load
+            _loading = false;
     }
 
     public void Dispose() => BudgetState.StateChanged -= OnStateChanged;
@@ -93,47 +119,37 @@
     private void OnStateChanged() => InvokeAsync(async () =>
     {
         try   { await LoadAsync(); }
-        catch { /* surfaced via _loadError */ }
+        catch { /* errors surfaced via _loadError */ }
         StateHasChanged();
     });
 
     private async Task OnYearChanged(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out var y))
-        {
-            _year = y;
-            await LoadAsync();
-        }
+        if (int.TryParse(e.Value?.ToString(), out var y)) { _year = y; await LoadAsync(); }
     }
 
     private async Task LoadAsync()
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
-
-        _loading   = true;
-        _loadError = null;
-        StateHasChanged();
-
+        _loading = true; _loadError = null; StateHasChanged();
         try
         {
-            var summary = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
+            var summary   = await ReportsSvc.GetMonthlySummaryAsync(BudgetState.ActiveBudgetId, _year);
             var breakdown = await ReportsSvc.GetCategoryBreakdownAsync(
                 BudgetState.ActiveBudgetId,
                 new DateTime(_year, 1, 1),
                 new DateTime(_year, 12, 31));
 
             _loading = false;
-            StateHasChanged(); // render KPI cards before invoking JS
+            StateHasChanged(); // ensure chart divs are in DOM before JS calls
 
             if (summary != null)
             {
                 _totalIncome  = summary.Rows.Sum(r => r.Income);
                 _totalExpense = summary.Rows.Sum(r => r.Expenses);
-
                 var months = summary.Rows.Select(r => $"{r.Year}-{r.Month:D2}").ToArray();
                 var inc    = summary.Rows.Select(r => (double)r.Income).ToArray();
                 var exp    = summary.Rows.Select(r => (double)Math.Abs(r.Expenses)).ToArray();
-
                 await JS.InvokeVoidAsync("renderBarChart", "monthly-chart", months, inc, exp);
             }
 

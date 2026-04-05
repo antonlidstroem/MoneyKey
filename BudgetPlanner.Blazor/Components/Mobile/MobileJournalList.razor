@@ -1,14 +1,19 @@
 @implements IDisposable
 @inject JournalApiService JournalSvc
-@inject ReceiptApiService ReceiptSvc
+@inject TransactionService TxSvc
+@inject ProjectService ProjectSvc
 @inject ToastService Toast
 @inject BudgetState BudgetState
 @inject JournalFilterState Filter
 @inject SignalRService SignalR
 @inject NavigationManager Nav
+@inject HttpClient Http
+@using BudgetPlanner.Blazor.Components.Filter
+@using BudgetPlanner.Blazor.Components.Forms
 @using BudgetPlanner.Blazor.Components.Shared
 
 <div class="mobile-shell">
+
     <div class="mobile-topbar">
         <span class="mobile-title">@BudgetState.ActiveBudgetName</span>
         <div style="display:flex;gap:6px">
@@ -16,7 +21,7 @@
                 <span class="material-icons">search</span>
             </button>
             <button class="mobile-icon-btn @(Filter.HasActiveFilters ? "active" : "")"
-                    @onclick="() => _filterOpen = true">
+                    @onclick='() => _filterOpen = true'>
                 <span class="material-icons">filter_list</span>
                 @if (Filter.HasActiveFilters) { <span class="mobile-badge"></span> }
             </button>
@@ -67,7 +72,7 @@
                 @onclick="() => Filter.ShowAllTypes()">Alla</button>
         @foreach (var t in Enum.GetValues<JournalEntryType>())
         {
-            var type = t;
+            var type  = t;
             var isSolo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
             <button class="mobile-chip @(isSolo ? "active" : "")"
                     @onclick="() => Filter.SetOnlyType(type)">@ShortLabel(type)</button>
@@ -101,7 +106,7 @@
             @foreach (var entry in _entries)
             {
                 var e = entry;
-                <div class="mobile-row" @onclick="() => _detail = e">
+                <div class="mobile-row" @onclick="() => OpenDetail(e)">
                     <div class="mobile-type-dot @DotCss(e.EntryType)">@e.TypeCode</div>
                     <div class="mobile-row-mid">
                         <div class="mobile-row-desc">
@@ -112,10 +117,7 @@
                             }
                         </div>
                         <div class="mobile-row-meta">
-                            @if (e.MetaLine != null)
-                            {
-                                @e.MetaLine
-                            }
+                            @if (e.MetaLine != null) { @e.MetaLine }
                             else
                             {
                                 @(e.CategoryName ?? e.TypeLabel)
@@ -138,10 +140,7 @@
             {
                 <div style="text-align:center;padding:16px">
                     <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
-                        @if (_loadingMore)
-                        {
-                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
-                        }
+                        @if (_loadingMore) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
                         Ladda fler (@(_totalCount - _entries.Count) kvar)
                     </button>
                 </div>
@@ -151,7 +150,7 @@
 
     @if (BudgetState.CanEdit)
     {
-        <button class="mobile-fab" @onclick='() => Nav.NavigateTo("/?newTx=1")'>
+        <button class="mobile-fab" @onclick='() => _addOpen = true'>
             <span class="material-icons">add</span>
         </button>
     }
@@ -159,19 +158,24 @@
 
 @if (_detail != null)
 {
-    <div class="sheet-overlay" @onclick="() => _detail = null">
+    <div class="sheet-overlay" @onclick="CloseDetail">
         <div class="sheet-container" @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
+
             <div class="sheet-head">
                 <div style="display:flex;align-items:center;gap:8px">
-                    <span class="mobile-type-dot @DotCss(_detail.EntryType)" style="width:24px;height:24px;font-size:.7rem">@_detail.TypeCode</span>
+                    <span class="mobile-type-dot @DotCss(_detail.EntryType)" style="width:24px;height:24px;font-size:.7rem">
+                        @_detail.TypeCode
+                    </span>
                     <span style="font-size:15px;font-weight:500">@_detail.Description</span>
                 </div>
-                <button class="mobile-icon-btn" @onclick="() => _detail = null">
+                <button class="mobile-icon-btn" @onclick="CloseDetail">
                     <span class="material-icons" style="font-size:1.1rem">close</span>
                 </button>
             </div>
+
             <div class="sheet-amount @AmountCss(_detail)">@FormatAmount(_detail)</div>
+
             <div class="sheet-fields">
                 <div class="sheet-field">
                     <span class="sheet-field-label">Datum</span>
@@ -219,50 +223,164 @@
                     </div>
                 }
             </div>
+
+            @if (_detail.KonteringRows.Any())
+            {
+                <div style="padding:0 16px 8px">
+                    <div style="font-size:.7rem;font-weight:600;color:var(--color-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                        Kontering
+                    </div>
+                    @foreach (var k in _detail.KonteringRows)
+                    {
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:.5px solid var(--color-border);font-size:.82rem;gap:10px">
+                            <div>
+                                <span style="font-weight:500;font-family:monospace">@k.KontoNr</span>
+                                @if (k.CostCenter != null) { <span style="color:var(--color-muted)"> · @k.CostCenter</span> }
+                                @if (k.Description != null)
+                                {
+                                    <div style="color:var(--color-muted);font-size:.75rem">@k.Description</div>
+                                }
+                            </div>
+                            <span style="font-weight:500;white-space:nowrap">@k.Amount.ToString("N2") kr</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_confirmingDelete)
+            {
+                <div class="mobile-inline-confirm">
+                    <p>Ta bort denna transaktion? Åtgärden kan inte ångras.</p>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-danger btn-sm" @onclick="ConfirmDeleteAsync" disabled="@_deleting">
+                            @if (_deleting) { <span class="spinner" style="width:12px;height:12px;border-width:2px"></span> }
+                            Ta bort
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @onclick='() => _confirmingDelete = false'>
+                            Avbryt
+                        </button>
+                    </div>
+                </div>
+            }
+
             <div class="sheet-actions">
                 @if (_detail.EntryType == JournalEntryType.ReceiptBatch)
                 {
-                    var detailId = _detail.SourceId;
+                    var receiptId = _detail.SourceId;
                     <button class="btn btn-primary"
-                            @onclick='() => { _detail = null; Nav.NavigateTo($"/receipts/{detailId}"); }'>
+                            @onclick='() => { CloseDetail(); Nav.NavigateTo($"/receipts/{receiptId}"); }'>
                         <span class="material-icons" style="font-size:.9rem">open_in_new</span> Öppna underlag
                     </button>
+                }
+
+                @if (BudgetState.CanEdit && _detail.EntryType == JournalEntryType.Transaction)
+                {
+                    @if (_editingId == _detail.SourceId)
+                    {
+                        <button class="btn btn-secondary" disabled>
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary" @onclick="StartEditAsync">
+                            <span class="material-icons" style="font-size:.9rem">edit</span> Redigera
+                        </button>
+                    }
+
+                    @if (!_confirmingDelete)
+                    {
+                        <button class="btn btn-secondary" style="color:var(--color-expense)"
+                                @onclick='() => _confirmingDelete = true'>
+                            <span class="material-icons" style="font-size:.9rem">delete</span> Ta bort
+                        </button>
+                    }
                 }
             </div>
         </div>
     </div>
 }
 
+@if (_editOpen && _editTx != null)
+{
+    <div class="sheet-overlay" @onclick='() => _editOpen = false'>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:0 4px 24px">
+                <TransactionForm EditTransaction="_editTx"
+                                 Projects="_projects"
+                                 OnSaved="OnTransactionSaved"
+                                 OnCancelled='() => _editOpen = false' />
+            </div>
+        </div>
+    </div>
+}
+
+@if (_addOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _addOpen = false'>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:0 4px 24px">
+                <TransactionForm EditTransaction="null"
+                                 Projects="_projects"
+                                 OnSaved="OnTransactionSaved"
+                                 OnCancelled='() => _addOpen = false' />
+            </div>
+        </div>
+    </div>
+}
+
+@if (_filterOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _filterOpen = false'>
+        <div class="sheet-container" style="max-height:85%" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:.5px solid var(--color-border)">
+                <span style="font-weight:500;font-size:.9rem">Filter</span>
+                <button class="mobile-icon-btn" @onclick='() => _filterOpen = false'>
+                    <span class="material-icons" style="font-size:1rem">close</span>
+                </button>
+            </div>
+            <div style="overflow-y:auto;padding:8px 0 24px">
+                <JournalFilterPanel />
+            </div>
+        </div>
+    </div>
+}
+
 @code {
-    private List<JournalEntryDto> _entries     = new();
+    private List<JournalEntryDto> _entries    = new();
+    private List<ProjectDto>      _projects   = new();
     private SummaryDto?           _summary;
     private JournalEntryDto?      _detail;
+    private TransactionDto?       _editTx;
     private ElementReference      _searchRef;
-    private string _searchText  = "";
-    private bool   _loading     = true;
-    private bool   _loadingMore;
-    private bool   _searchOpen;
-    private bool   _filterOpen;
-    private int    _totalCount;
-    private int    _totalPages;
+
+    private string  _searchText       = "";
+    private bool    _loading          = true;
+    private bool    _loadingMore;
+    private bool    _searchOpen;
+    private bool    _filterOpen;
+    private bool    _addOpen;
+    private bool    _editOpen;
+    private bool    _confirmingDelete;
+    private bool    _deleting;
+    private int     _editingId        = -1;
+    private int     _totalCount;
+    private int     _totalPages;
 
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe FIRST — before any await — so no events are missed.
         Filter.FilterChanged     += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
         SignalR.OnBudgetEvent    += OnSignalR;
 
-        // FIX: guard against budgetId=0. If budgets haven't loaded yet, wait
-        // for OnStateChanged which fires when MainLayout calls SetBudgets.
         if (BudgetState.ActiveBudgetId > 0)
         {
-            // FIX: wrap in try/catch — GetFromJsonAsync in .NET 8 throws
-            // HttpRequestException on non-2xx responses. Without this catch,
-            // an error during initial load crashes the entire component and
-            // the "Unhandled exception rendering component" appears.
             try
             {
+                await LoadProjectsAsync();
                 await LoadAsync(reset: true);
             }
             catch (Exception ex)
@@ -284,7 +402,6 @@
         SignalR.OnBudgetEvent    -= OnSignalR;
     }
 
-    // FIX: safe fire-and-forget wrapper instead of async void.
     private void OnFilterChanged() => InvokeAsync(async () =>
     {
         try   { await LoadAsync(reset: true); }
@@ -294,29 +411,36 @@
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        try   { await LoadAsync(reset: true); }
+        try
+        {
+            await LoadProjectsAsync();
+            await LoadAsync(reset: true);
+        }
         catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
         StateHasChanged();
     });
 
+    private async Task LoadProjectsAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        try   { _projects = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId) ?? new(); }
+        catch { _projects = new(); }
+    }
+
     private async Task LoadAsync(bool reset)
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
-
         if (reset) { Filter.Query.Page = 1; _entries.Clear(); }
         _loading = true;
 
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
         if (r.HasValue)
         {
-            _entries    = reset
-                ? r.Value.Result.Items
-                : _entries.Concat(r.Value.Result.Items).ToList();
+            _entries    = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
             _totalCount = r.Value.Result.TotalCount;
             _totalPages = r.Value.Result.TotalPages;
             _summary    = r.Value.Summary;
         }
-
         _loading = false;
     }
 
@@ -346,14 +470,65 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private void OpenDetail(JournalEntryDto entry)
+    {
+        _detail           = entry;
+        _confirmingDelete = false;
+    }
+
+    private void CloseDetail()
+    {
+        _detail           = null;
+        _confirmingDelete = false;
+    }
+
+    private async Task StartEditAsync()
+    {
+        if (_detail == null) return;
+        var sourceId = _detail.SourceId;
+        _editingId   = sourceId;
+        StateHasChanged();
+        try
+        {
+            var full = await Http.GetFromJsonAsync<TransactionDto>(
+                $"api/budgets/{BudgetState.ActiveBudgetId}/transactions/{sourceId}");
+            if (full == null) { Toast.Error("Kunde inte hämta transaktionen."); return; }
+            _editTx   = full;
+            _detail   = null;
+            _editOpen = true;
+        }
+        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        finally { _editingId = -1; StateHasChanged(); }
+    }
+
+    private async Task OnTransactionSaved(TransactionDto _)
+    {
+        _addOpen  = false;
+        _editOpen = false;
+        _editTx   = null;
+        await LoadAsync(reset: true);
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_detail == null) return;
+        _deleting = true;
+        var id = _detail.SourceId;
+        try
+        {
+            await TxSvc.DeleteAsync(BudgetState.ActiveBudgetId, id);
+            Toast.Success("Transaktion borttagen.");
+            CloseDetail();
+            await LoadAsync(reset: true);
+        }
+        catch (Exception ex) { Toast.Error($"Borttagning misslyckades: {ex.Message}"); }
+        finally { _deleting = false; }
+    }
+
     private async Task ToggleSearch()
     {
         _searchOpen = !_searchOpen;
-        if (_searchOpen)
-        {
-            await Task.Delay(80);
-            await _searchRef.FocusAsync();
-        }
+        if (_searchOpen) { await Task.Delay(80); await _searchRef.FocusAsync(); }
     }
 
     private void CloseSearch()
