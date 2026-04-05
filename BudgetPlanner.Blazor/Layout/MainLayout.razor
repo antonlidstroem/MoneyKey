@@ -14,7 +14,7 @@
 
         <div class="budget-switcher">
             <select @onchange="OnBudgetChanged" value="@BudgetState.ActiveBudgetId">
-                @if (BudgetState.MyBudgets == null || !BudgetState.MyBudgets.Any())
+                @if (!BudgetState.MyBudgets.Any())
                 {
                     <option disabled selected>Inga budgetar...</option>
                 }
@@ -79,15 +79,100 @@
     </div>
 </div>
 
+<!-- ── MOBILE BOTTOM NAVIGATION BAR ─────────────────────────────────────── -->
+<nav class="mobile-bottom-nav">
+    <NavLink class="mobile-nav-tab" href="/" Match="NavLinkMatch.All">
+        <span class="material-icons">list_alt</span>
+        <span>Journal</span>
+    </NavLink>
+    <NavLink class="mobile-nav-tab" href="/projects">
+        <span class="material-icons">folder</span>
+        <span>Projekt</span>
+    </NavLink>
+    <NavLink class="mobile-nav-tab" href="/receipts">
+        <span class="material-icons">receipt_long</span>
+        <span>Kvitton</span>
+    </NavLink>
+    <button class="mobile-nav-tab" @onclick='() => _morOpen = true'>
+        <span class="material-icons">more_horiz</span>
+        <span>Mer</span>
+    </button>
+</nav>
+
+<!-- ── MER SHEET ─────────────────────────────────────────────────────────── -->
+@if (_morOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _morOpen = false'>
+        <div class="sheet-container" @onclick:stopPropagation style="max-height:90%">
+            <div class="sheet-handle-bar"></div>
+
+            <!-- User info -->
+            <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:.5px solid var(--color-border)">
+                <div class="user-avatar" style="width:40px;height:40px;font-size:.9rem;flex-shrink:0">@Initials</div>
+                <div>
+                    <div style="font-weight:500;font-size:.9rem;color:var(--color-dark)">
+                        @AuthSvc.CurrentUser?.FirstName @AuthSvc.CurrentUser?.LastName
+                    </div>
+                    <div style="font-size:.78rem;color:var(--color-muted)">@(AuthSvc.CurrentUser?.Email ?? "")</div>
+                </div>
+            </div>
+
+            <!-- Budget switcher -->
+            @if (BudgetState.MyBudgets.Count > 1)
+            {
+                <div style="padding:12px 16px;border-bottom:.5px solid var(--color-border)">
+                    <div style="font-size:.7rem;font-weight:600;color:var(--color-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                        Aktiv budget
+                    </div>
+                    <select class="form-control" @onchange="OnBudgetChanged" value="@BudgetState.ActiveBudgetId">
+                        @foreach (var b in BudgetState.MyBudgets)
+                        {
+                            <option value="@b.Id">@b.Name</option>
+                        }
+                    </select>
+                </div>
+            }
+
+            <!-- Navigation links -->
+            <a class="more-nav-item" href="/milersattning" @onclick='() => _morOpen = false'>
+                <span class="material-icons">directions_car</span> Milersättning
+            </a>
+            <a class="more-nav-item" href="/vab" @onclick='() => _morOpen = false'>
+                <span class="material-icons">child_care</span> VAB
+            </a>
+            <a class="more-nav-item" href="/dashboard" @onclick='() => _morOpen = false'>
+                <span class="material-icons">dashboard</span> Dashboard
+            </a>
+            <a class="more-nav-item" href="/reports" @onclick='() => _morOpen = false'>
+                <span class="material-icons">bar_chart</span> Export &amp; Import
+            </a>
+            @if (BudgetState.IsOwner)
+            {
+                <a class="more-nav-item" href="/settings" @onclick='() => _morOpen = false'>
+                    <span class="material-icons">settings</span> Inställningar
+                </a>
+            }
+
+            <!-- Logout -->
+            <div style="padding:16px">
+                <button class="btn btn-secondary" style="width:100%;justify-content:center"
+                        @onclick="MobileLogoutAsync">
+                    <span class="material-icons" style="font-size:.9rem">logout</span> Logga ut
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 <ToastContainer />
 
 @code {
     [CascadingParameter]
     private Task<AuthenticationState>? AuthStateTask { get; set; }
 
-    // FIX: inject AuthenticationStateProvider so it can be passed to SignalR
-    // for token refresh on reconnect.
     [Inject] private AuthenticationStateProvider AuthProvider { get; set; } = null!;
+
+    private bool _morOpen;
 
     private string Initials => AuthSvc.CurrentUser is { } u
         ? $"{u.FirstName?.FirstOrDefault()}{u.LastName?.FirstOrDefault()}".ToUpper()
@@ -98,7 +183,7 @@
         if (AuthStateTask != null)
         {
             var authState = await AuthStateTask;
-            if (authState.User.Identity is not null && authState.User.Identity.IsAuthenticated)
+            if (authState.User.Identity is { IsAuthenticated: true })
             {
                 try
                 {
@@ -109,7 +194,6 @@
                     if (!string.IsNullOrEmpty(token))
                     {
                         var apiBase = Config["ApiBaseUrl"] ?? "https://localhost:7000";
-                        // FIX: pass AuthProvider so SignalR can refresh tokens on reconnect.
                         await SignalR.ConnectAsync(apiBase, token, BudgetState.ActiveBudgetId, AuthProvider);
                     }
                 }
@@ -130,6 +214,7 @@
             {
                 BudgetState.SetActiveBudget(b);
                 await SignalR.SwitchBudgetAsync(id);
+                _morOpen = false;
                 Nav.NavigateTo("/");
             }
         }
@@ -137,6 +222,13 @@
 
     private async Task LogoutAsync()
     {
+        await AuthSvc.LogoutAsync();
+        Nav.NavigateTo("/login");
+    }
+
+    private async Task MobileLogoutAsync()
+    {
+        _morOpen = false;
         await AuthSvc.LogoutAsync();
         Nav.NavigateTo("/login");
     }

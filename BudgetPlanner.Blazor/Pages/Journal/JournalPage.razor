@@ -67,9 +67,7 @@
                 <div class="grid-toolbar">
                     <div class="quick-filter">
                         <span class="material-icons">search</span>
-                        <input placeholder="Snabbsök..."
-                               value="@_qs"
-                               @oninput="OnQuickSearch" />
+                        <input placeholder="Snabbsök..." value="@_qs" @oninput="OnQuickSearch" />
                     </div>
                     <div style="display:flex;gap:4px;flex-wrap:wrap">
                         <button class="btn btn-sm @(!Filter.Query.IncludeTypes.Any() ? "btn-primary" : "btn-secondary")"
@@ -119,19 +117,13 @@
                                     <th style="width:32px">
                                         <input type="checkbox" checked="@_selectAll" @onchange="ToggleAll" />
                                     </th>
-                                    <th style="cursor:pointer;width:100px" @onclick='() => SetSort("Date")'>
-                                        Datum @SortIndicator("Date")
-                                    </th>
+                                    <th style="cursor:pointer;width:100px" @onclick='() => SetSort("Date")'>Datum @SortIndicator("Date")</th>
                                     <th style="width:92px">Typ</th>
-                                    <th style="cursor:pointer" @onclick='() => SetSort("Description")'>
-                                        Beskrivning @SortIndicator("Description")
-                                    </th>
+                                    <th style="cursor:pointer" @onclick='() => SetSort("Description")'>Beskrivning @SortIndicator("Description")</th>
                                     <th style="width:150px">Kategori / Meta</th>
                                     <th style="width:110px">Projekt</th>
                                     <th style="width:90px">Status</th>
-                                    <th style="cursor:pointer;text-align:right;width:105px" @onclick='() => SetSort("Amount")'>
-                                        Belopp @SortIndicator("Amount")
-                                    </th>
+                                    <th style="cursor:pointer;text-align:right;width:105px" @onclick='() => SetSort("Amount")'>Belopp @SortIndicator("Amount")</th>
                                     <th style="width:64px"></th>
                                 </tr>
                             </thead>
@@ -159,9 +151,7 @@
                                                 <input type="checkbox" checked="@isSel" @onchange="() => ToggleRow(e.SourceId)" />
                                             </td>
                                             <td style="font-size:.8rem;color:var(--color-muted)">@e.Date.ToString("yyyy-MM-dd")</td>
-                                            <td>
-                                                <span class="badge @TypeBadge(e.EntryType)" style="font-size:.7rem">@e.TypeLabel</span>
-                                            </td>
+                                            <td><span class="badge @TypeBadge(e.EntryType)" style="font-size:.7rem">@e.TypeLabel</span></td>
                                             <td>
                                                 <span style="font-size:.875rem">@e.Description</span>
                                                 @if (e.HasDetail && e.EntryType == JournalEntryType.Transaction)
@@ -199,8 +189,10 @@
                                                 }
                                                 @if (e.EntryType == JournalEntryType.ReceiptBatch)
                                                 {
+                                                    var rid = e.SourceId;
+                                                    <!-- FIX: single-quoted attribute so interpolated string works without backslash escaping -->
                                                     <button class="btn btn-ghost btn-icon btn-sm" title="Öppna underlag"
-                                                            @onclick="() => Nav.NavigateTo($\"/receipts/{e.SourceId}\")">
+                                                            @onclick='() => Nav.NavigateTo($"/receipts/{rid}")'>
                                                         <span class="material-icons" style="font-size:.9rem">open_in_new</span>
                                                     </button>
                                                 }
@@ -246,18 +238,14 @@
                 <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--color-border);flex-shrink:0">
                     <span style="font-size:.8rem;color:var(--color-muted)">Sida @Filter.Query.Page av @_totalPages</span>
                     <div style="display:flex;gap:3px">
-                        <button class="btn btn-secondary btn-sm"
-                                disabled="@(Filter.Query.Page <= 1)"
-                                @onclick="PrevPage">‹</button>
+                        <button class="btn btn-secondary btn-sm" disabled="@(Filter.Query.Page <= 1)" @onclick="PrevPage">‹</button>
                         @for (var p = Math.Max(1, Filter.Query.Page - 2); p <= Math.Min(_totalPages, Filter.Query.Page + 2); p++)
                         {
                             var pg = p;
                             <button class="btn btn-sm @(pg == Filter.Query.Page ? "btn-primary" : "btn-secondary")"
                                     @onclick="() => GoPage(pg)">@pg</button>
                         }
-                        <button class="btn btn-secondary btn-sm"
-                                disabled="@(Filter.Query.Page >= _totalPages)"
-                                @onclick="NextPage">›</button>
+                        <button class="btn btn-secondary btn-sm" disabled="@(Filter.Query.Page >= _totalPages)" @onclick="NextPage">›</button>
                     </div>
                 </div>
 
@@ -281,12 +269,10 @@
     <MobileJournalList />
 </div>
 
-<ConfirmDialog @ref="_confirmDialog"
-               Title="Ta bort"
+<ConfirmDialog @ref="_confirmDialog" Title="Ta bort"
                Message="Är du säker? Transaktioner kan inte återställas." />
 
 @code {
-    // ── State ──────────────────────────────────────────────────────────────────
     private List<JournalEntryDto> _entries      = new();
     private List<ProjectDto>      _projects     = new();
     private SummaryDto?           _summary;
@@ -300,15 +286,13 @@
     private bool    _loading   = true;
     private bool    _showForm;
     private bool    _selectAll;
-    private bool    _exporting;          // disables both export buttons while a download is in progress
+    private bool    _exporting;
     private int     _totalCount;
     private int     _totalPages;
     private int     _editingId = -1;
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
     {
-        // Subscribe BEFORE any await so no events are missed while data loads.
         Filter.FilterChanged     += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
         SignalR.OnBudgetEvent    += OnSignalREvent;
@@ -331,7 +315,6 @@
         SignalR.OnBudgetEvent    -= OnSignalREvent;
     }
 
-    // ── Event handlers ────────────────────────────────────────────────────────
     private void OnFilterChanged() => InvokeAsync(async () =>
     {
         try   { await LoadAsync(); }
@@ -341,11 +324,7 @@
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        try
-        {
-            await LoadProjectsAsync();
-            await LoadAsync();
-        }
+        try { await LoadProjectsAsync(); await LoadAsync(); }
         catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
         StateHasChanged();
     });
@@ -358,7 +337,6 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    // ── Data loading ──────────────────────────────────────────────────────────
     private async Task LoadProjectsAsync()
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
@@ -369,10 +347,7 @@
     private async Task LoadAsync()
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
-
-        _loading   = true;
-        _loadError = null;
-        StateHasChanged();
+        _loading = true; _loadError = null; StateHasChanged();
         try
         {
             var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
@@ -385,22 +360,20 @@
             }
             else
             {
-                _loadError = "Inget svar från API:et. Kontrollera anslutningen.";
+                _loadError = "Inget svar från API:et.";
             }
         }
         catch (Exception ex) { _loadError = $"Kunde inte ladda journal: {ex.Message}"; }
         finally { _loading = false; }
     }
 
-    // ── Toolbar ───────────────────────────────────────────────────────────────
     private void ToggleFilter()  => Filter.IsFilterPanelOpen = !Filter.IsFilterPanelOpen;
     private void OpenNewForm()   { _editTx = null; _showForm = true; }
     private void CloseForm()     => _showForm = false;
     private async Task RetryLoad() => await LoadAsync();
-
-    private void ShowAllTypes()                => Filter.ShowAllTypes();
+    private void ShowAllTypes()                  => Filter.ShowAllTypes();
     private void SetOnlyType(JournalEntryType t) => Filter.SetOnlyType(t);
-    private void SetSort(string col)           => Filter.SetSort(col);
+    private void SetSort(string col)             => Filter.SetSort(col);
 
     private void OnQuickSearch(ChangeEventArgs e)
     {
@@ -411,46 +384,23 @@
     private async Task OnPageSizeChanged(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var size))
-        {
-            Filter.Query.PageSize = size;
-            Filter.SetPage(1);
-            await LoadAsync();
-        }
+        { Filter.Query.PageSize = size; Filter.SetPage(1); await LoadAsync(); }
     }
 
-    private async Task PrevPage() { Filter.SetPage(Filter.Query.Page - 1); await LoadAsync(); }
-    private async Task NextPage() { Filter.SetPage(Filter.Query.Page + 1); await LoadAsync(); }
+    private async Task PrevPage()    { Filter.SetPage(Filter.Query.Page - 1); await LoadAsync(); }
+    private async Task NextPage()    { Filter.SetPage(Filter.Query.Page + 1); await LoadAsync(); }
     private async Task GoPage(int p) { Filter.SetPage(p); await LoadAsync(); }
 
-    // ── Export ────────────────────────────────────────────────────────────────
-    // FIX: Nav.NavigateTo with forceLoad:true sends the browser directly to the
-    // URL with NO Authorization header — the JWT is in memory only.
-    // The browser also resolves a relative URL against the Blazor host (port 7001),
-    // not the API host (port 7000), so it also hits the wrong server.
-    //
-    // Correct pattern for authenticated file downloads in Blazor WASM:
-    //   1. HttpClient.GetAsync()  →  goes through AuthorizationMessageHandler (adds Bearer token)
-    //   2. Read response bytes
-    //   3. JS interop downloadFile()  →  triggers browser Save dialog via Blob URL
-    //
-    // Requires downloadFile() to be defined in wwwroot (see fileDownload.js).
     private async Task ExportPdfAsync()
     {
         if (BudgetState.ActiveBudgetId <= 0) return;
         _exporting = true;
         try
         {
-            var url      = JournalSvc.GetPdfUrl(BudgetState.ActiveBudgetId, Filter.Query);
-            var response = await Http.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-            {
-                Toast.Error($"Export misslyckades ({(int)response.StatusCode}).");
-                return;
-            }
-            var bytes    = await response.Content.ReadAsByteArrayAsync();
-            var base64   = Convert.ToBase64String(bytes);
-            var filename = $"transaktioner_{DateTime.Today:yyyyMMdd}.pdf";
-            await JS.InvokeVoidAsync("downloadFile", filename, "application/pdf", base64);
+            var response = await Http.GetAsync(JournalSvc.GetPdfUrl(BudgetState.ActiveBudgetId, Filter.Query));
+            if (!response.IsSuccessStatusCode) { Toast.Error($"Export misslyckades ({(int)response.StatusCode})."); return; }
+            var base64   = Convert.ToBase64String(await response.Content.ReadAsByteArrayAsync());
+            await JS.InvokeVoidAsync("downloadFile", $"transaktioner_{DateTime.Today:yyyyMMdd}.pdf", "application/pdf", base64);
         }
         catch (Exception ex) { Toast.Error($"Export misslyckades: {ex.Message}"); }
         finally { _exporting = false; }
@@ -462,24 +412,16 @@
         _exporting = true;
         try
         {
-            var url      = JournalSvc.GetExcelUrl(BudgetState.ActiveBudgetId, Filter.Query);
-            var response = await Http.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-            {
-                Toast.Error($"Export misslyckades ({(int)response.StatusCode}).");
-                return;
-            }
-            var bytes    = await response.Content.ReadAsByteArrayAsync();
-            var base64   = Convert.ToBase64String(bytes);
-            var filename = $"transaktioner_{DateTime.Today:yyyyMMdd}.xlsx";
-            await JS.InvokeVoidAsync("downloadFile", filename,
+            var response = await Http.GetAsync(JournalSvc.GetExcelUrl(BudgetState.ActiveBudgetId, Filter.Query));
+            if (!response.IsSuccessStatusCode) { Toast.Error($"Export misslyckades ({(int)response.StatusCode})."); return; }
+            var base64   = Convert.ToBase64String(await response.Content.ReadAsByteArrayAsync());
+            await JS.InvokeVoidAsync("downloadFile", $"transaktioner_{DateTime.Today:yyyyMMdd}.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64);
         }
         catch (Exception ex) { Toast.Error($"Export misslyckades: {ex.Message}"); }
         finally { _exporting = false; }
     }
 
-    // ── Row actions ───────────────────────────────────────────────────────────
     private void ToggleRow(int id)
     {
         if (!_selectedIds.Remove(id)) _selectedIds.Add(id);
@@ -497,17 +439,15 @@
 
     private async Task EditEntryAsync(JournalEntryDto entry)
     {
-        _editingId = entry.SourceId;
-        StateHasChanged();
+        _editingId = entry.SourceId; StateHasChanged();
         try
         {
             var full = await Http.GetFromJsonAsync<TransactionDto>(
                 $"api/budgets/{BudgetState.ActiveBudgetId}/transactions/{entry.SourceId}");
             if (full == null) { Toast.Error("Kunde inte hämta transaktionen."); return; }
-            _editTx   = full;
-            _showForm = true;
+            _editTx = full; _showForm = true;
         }
-        catch (Exception ex) { Toast.Error($"Fel vid hämtning: {ex.Message}"); }
+        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
         finally { _editingId = -1; StateHasChanged(); }
     }
 
@@ -530,7 +470,6 @@
         catch (Exception ex) { Toast.Error($"Borttagning misslyckades: {ex.Message}"); }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     private string SortIndicator(string col) =>
         Filter.Query.SortBy != col ? "" : Filter.Query.SortDir == "asc" ? " ▲" : " ▼";
 
@@ -542,7 +481,6 @@
         JournalEntryType.ReceiptBatch  => "Kvitto",
         _                              => t.ToString()
     };
-
     private static string TypeBadge(JournalEntryType t) => t switch
     {
         JournalEntryType.Transaction   => "badge-primary",
@@ -550,7 +488,6 @@
         JournalEntryType.Vab           => "badge-income",
         _                              => "badge"
     };
-
     private static string StatusBadge(string s) => s switch
     {
         "Godkänd"   => "badge-income",
@@ -559,7 +496,6 @@
         "Inskickad" => "badge",
         _           => "badge-muted"
     };
-
     private static string AmountStr(JournalEntryDto e) =>
         e.EntryType == JournalEntryType.ReceiptBatch
             ? $"{e.Amount:N0} kr"

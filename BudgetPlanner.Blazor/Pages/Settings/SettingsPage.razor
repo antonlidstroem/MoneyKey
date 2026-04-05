@@ -4,54 +4,22 @@
 @inject ToastService Toast
 @inject BudgetState BudgetState
 
-<div class="page-header"><span class="page-title">Inställningar</span></div>
-<div class="page-content" style="max-width:600px;display:flex;flex-direction:column;gap:16px">
-
-    <div class="card">
-        <div class="card-title"><span class="material-icons">manage_accounts</span> Budget</div>
-        <div class="form-group">
-            <label class="form-label">Budgetnamn</label>
-            <input class="form-control" @bind="_budgetName" />
-        </div>
-        <div class="form-group">
-            <label class="form-label">Beskrivning</label>
-            <input class="form-control" @bind="_budgetDescription" placeholder="Valfri beskrivning..." />
-        </div>
-        @if (!string.IsNullOrEmpty(_saveError))
-        {
-            <div style="color:var(--color-expense);font-size:.85rem;margin-bottom:8px">@_saveError</div>
-        }
-        <button class="btn btn-primary btn-sm" @onclick="SaveBudgetAsync" disabled="@_saving">
-            @if (_saving) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
-            Spara
-        </button>
+<!-- ── DESKTOP ─────────────────────────────────────────────────────────────── -->
+<div class="desktop-page-wrapper">
+    <div class="page-header"><span class="page-title">Inställningar</span></div>
+    <div class="page-content" style="max-width:600px;display:flex;flex-direction:column;gap:16px">
+        @SettingsBody()
     </div>
+</div>
 
-    @if (BudgetState.IsOwner)
-    {
-        <div class="card">
-            <div class="card-title"><span class="material-icons">group_add</span> Bjud in användare</div>
-            <div class="form-row">
-                <div class="form-group" style="flex:2">
-                    <label class="form-label">E-postadress</label>
-                    <input class="form-control" type="email" @bind="_inviteEmail" placeholder="anvan@example.com" />
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Roll</label>
-                    <select class="form-control" @bind="_inviteRole">
-                        <option value="@BudgetMemberRole.Viewer">Läsare</option>
-                        <option value="@BudgetMemberRole.Editor">Redigerare</option>
-                        <option value="@BudgetMemberRole.Auditor">Revisor</option>
-                        <option value="@BudgetMemberRole.Owner">Ägare</option>
-                    </select>
-                </div>
-            </div>
-            <button class="btn btn-primary btn-sm" @onclick="InviteAsync" disabled="@_inviting">
-                @if (_inviting) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
-                <span class="material-icons" style="font-size:.9rem">send</span> Skicka inbjudan
-            </button>
-        </div>
-    }
+<!-- ── MOBILE ──────────────────────────────────────────────────────────────── -->
+<div class="mobile-page-shell">
+    <div class="mobile-topbar">
+        <span class="mobile-title">Inställningar</span>
+    </div>
+    <div class="mobile-page-scroll">
+        @SettingsBody()
+    </div>
 </div>
 
 @code {
@@ -65,10 +33,9 @@
     protected override void OnInitialized()
     {
         _budgetName        = BudgetState.ActiveBudgetName;
-        _budgetDescription = "";   // description not cached in BudgetState; blank default
+        _budgetDescription = "";
     }
 
-    // FIX: was a no-op that only showed a toast. Now calls the API.
     private async Task SaveBudgetAsync()
     {
         if (string.IsNullOrWhiteSpace(_budgetName))
@@ -76,22 +43,15 @@
             _saveError = "Budgetnamnet får inte vara tomt.";
             return;
         }
-        _saveError = "";
-        _saving    = true;
+        _saveError = ""; _saving = true;
         try
         {
-            await BudgetSvc.UpdateAsync(
-                BudgetState.ActiveBudgetId,
+            await BudgetSvc.UpdateAsync(BudgetState.ActiveBudgetId,
                 new UpdateBudgetDto(_budgetName.Trim(), _budgetDescription));
-
-            // Reflect the new name in local state so the sidebar updates immediately.
             BudgetState.UpdateActiveBudgetName(_budgetName.Trim());
             Toast.Success("Budget uppdaterad.");
         }
-        catch (Exception ex)
-        {
-            _saveError = ex.Message;
-        }
+        catch (Exception ex) { _saveError = ex.Message; }
         finally { _saving = false; }
     }
 
@@ -101,11 +61,65 @@
         _inviting = true;
         try
         {
-            await BudgetSvc.InviteAsync(BudgetState.ActiveBudgetId, new InviteMemberDto(_inviteEmail, _inviteRole));
+            await BudgetSvc.InviteAsync(BudgetState.ActiveBudgetId,
+                new InviteMemberDto(_inviteEmail, _inviteRole));
             Toast.Success("Inbjudan skickad.");
             _inviteEmail = "";
         }
         catch (Exception ex) { Toast.Error(ex.Message); }
         finally { _inviting = false; }
     }
+
+    // Single RenderFragment used by both desktop and mobile — no duplicated markup.
+    private RenderFragment SettingsBody() =>
+        @<div style="display:flex;flex-direction:column;gap:16px">
+            <div class="card">
+                <div class="card-title">
+                    <span class="material-icons">manage_accounts</span> Budget
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Budgetnamn</label>
+                    <input class="form-control" @bind="_budgetName" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Beskrivning</label>
+                    <input class="form-control" @bind="_budgetDescription" placeholder="Valfri beskrivning..." />
+                </div>
+                @if (!string.IsNullOrEmpty(_saveError))
+                {
+                    <div style="color:var(--color-expense);font-size:.85rem;margin-bottom:8px">@_saveError</div>
+                }
+                <button class="btn btn-primary btn-sm" @onclick="SaveBudgetAsync" disabled="@_saving">
+                    @if (_saving) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                    Spara
+                </button>
+            </div>
+
+            @if (BudgetState.IsOwner)
+            {
+                <div class="card">
+                    <div class="card-title">
+                        <span class="material-icons">group_add</span> Bjud in användare
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">E-postadress</label>
+                        <input class="form-control" type="email" @bind="_inviteEmail"
+                               placeholder="anvan@example.com" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Roll</label>
+                        <select class="form-control" @bind="_inviteRole">
+                            <option value="@BudgetMemberRole.Viewer">Läsare</option>
+                            <option value="@BudgetMemberRole.Editor">Redigerare</option>
+                            <option value="@BudgetMemberRole.Auditor">Revisor</option>
+                            <option value="@BudgetMemberRole.Owner">Ägare</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary btn-sm" @onclick="InviteAsync" disabled="@_inviting">
+                        @if (_inviting) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                        <span class="material-icons" style="font-size:.9rem">send</span> Skicka inbjudan
+                    </button>
+                </div>
+            }
+        </div>;
 }
