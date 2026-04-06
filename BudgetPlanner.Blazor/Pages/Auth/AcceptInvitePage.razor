@@ -1,0 +1,120 @@
+@page "/accept-invite"
+@layout EmptyLayout
+@inject NavigationManager Nav
+@inject AuthService AuthSvc
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.WebUtilities
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--color-bg)">
+    <div style="width:100%;max-width:440px;padding:24px">
+        <div style="text-align:center;margin-bottom:32px">
+            <h1 style="font-size:1.8rem;font-weight:700;color:var(--color-primary)">BudgetPlanner</h1>
+            <p style="color:var(--color-muted);font-size:.9rem;margin-top:4px">Budgetinbjudan</p>
+        </div>
+
+        <div class="card">
+            @if (_loading)
+            {
+                <div style="text-align:center;padding:24px"><div class="spinner"></div></div>
+            }
+            else if (!string.IsNullOrEmpty(_error))
+            {
+                <div style="background:var(--color-expense-bg);color:var(--color-expense);padding:12px 14px;border-radius:8px;font-size:.875rem;margin-bottom:14px">
+                    @_error
+                </div>
+                <button class="btn btn-secondary" style="width:100%;justify-content:center"
+                        @onclick='() => Nav.NavigateTo("/")'>
+                    Gå till startsidan
+                </button>
+            }
+            else if (_accepted)
+            {
+                <div style="text-align:center;padding:20px">
+                    <span class="material-icons" style="font-size:3rem;color:var(--color-income);display:block;margin-bottom:8px">check_circle</span>
+                    <p style="font-weight:600;font-size:1rem">Inbjudan accepterad!</p>
+                    <p style="color:var(--color-muted);font-size:.875rem;margin-top:6px">Du har nu tillgång till budgeten.</p>
+                    <button class="btn btn-primary" style="margin-top:20px;width:100%;justify-content:center"
+                            @onclick='() => Nav.NavigateTo("/")'>
+                        <span class="material-icons" style="font-size:.9rem">arrow_forward</span> Gå till budgeten
+                    </button>
+                </div>
+            }
+            else if (!_isLoggedIn)
+            {
+                <div>
+                    <p style="margin-bottom:16px;color:var(--color-mid);font-size:.875rem">
+                        Du måste vara inloggad för att acceptera inbjudan. Logga in eller skapa
+                        ett konto — inbjudan väntar på dig efteråt.
+                    </p>
+                    <button class="btn btn-primary" style="width:100%;justify-content:center"
+                            @onclick="GoToLogin">
+                        <span class="material-icons" style="font-size:.9rem">login</span> Logga in / Skapa konto
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private bool _loading = true;
+    private bool _accepted;
+    private bool _isLoggedIn;
+    private string _error = "";
+    private string _token = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Parse token from query string
+        var uri   = new Uri(Nav.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+
+        if (!query.TryGetValue("token", out var tokenVal) || string.IsNullOrWhiteSpace(tokenVal))
+        {
+            _error   = "Ogiltig inbjudningslänk — ingen token hittades.";
+            _loading = false;
+            return;
+        }
+        _token = tokenVal!;
+
+        // Check authentication state
+        if (AuthStateTask != null)
+        {
+            var state  = await AuthStateTask;
+            _isLoggedIn = state.User.Identity?.IsAuthenticated == true;
+        }
+
+        if (_isLoggedIn)
+            await TryAcceptAsync();
+        else
+            _loading = false;
+    }
+
+    private async Task TryAcceptAsync()
+    {
+        _loading = true;
+        try
+        {
+            var result = await AuthSvc.AcceptInviteAsync(_token);
+            if (result != null)
+                _accepted = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void GoToLogin()
+    {
+        var returnUrl = Uri.EscapeDataString(Nav.Uri);
+        Nav.NavigateTo($"/login?returnUrl={returnUrl}");
+    }
+}

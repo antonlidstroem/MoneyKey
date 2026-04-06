@@ -1,4 +1,3 @@
-@* ── REPORTS ─────────────────────────────────────────────────────────────────── *@
 @page "/reports"
 @attribute [Authorize]
 @inject ImportApiService ImportSvc
@@ -7,8 +6,11 @@
 @inject BudgetState BudgetState
 @inject JournalFilterState Filter
 @inject NavigationManager Nav
+@inject HttpClient Http
+@inject IJSRuntime JS
 
 <div class="page-header"><span class="page-title">Export &amp; Import</span></div>
+
 <div class="page-content" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
 
     <div class="card">
@@ -17,11 +19,27 @@
             Exporterar aktuellt journal-filter som PDF eller Excel.
         </p>
         <div style="display:flex;gap:10px">
-            <button class="btn btn-secondary" @onclick="ExportPdf">
-                <span class="material-icons" style="font-size:.9rem">picture_as_pdf</span> PDF
+            <button class="btn btn-secondary" @onclick="ExportPdfAsync" disabled="@_exporting">
+                @if (_exporting)
+                {
+                    <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                }
+                else
+                {
+                    <span class="material-icons" style="font-size:.9rem">picture_as_pdf</span>
+                }
+                PDF
             </button>
-            <button class="btn btn-secondary" @onclick="ExportExcel">
-                <span class="material-icons" style="font-size:.9rem">table_view</span> Excel (4 flikar)
+            <button class="btn btn-secondary" @onclick="ExportExcelAsync" disabled="@_exporting">
+                @if (_exporting)
+                {
+                    <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                }
+                else
+                {
+                    <span class="material-icons" style="font-size:.9rem">table_view</span>
+                }
+                Excel (4 flikar)
             </button>
         </div>
     </div>
@@ -51,17 +69,28 @@
                     <div style="max-height:240px;overflow-y:auto;border:1px solid var(--color-border);border-radius:8px">
                         <table style="width:100%;border-collapse:collapse;font-size:.8rem">
                             <thead style="background:var(--color-bg)">
-                                <tr><th style="padding:6px 10px">✓</th><th>Datum</th><th style="text-align:right">Belopp</th><th>Beskrivning</th></tr>
+                                <tr>
+                                    <th style="padding:6px 10px">✓</th>
+                                    <th>Datum</th>
+                                    <th style="text-align:right">Belopp</th>
+                                    <th>Beskrivning</th>
+                                </tr>
                             </thead>
                             <tbody>
                                 @foreach (var r in _preview.Rows)
                                 {
                                     var row = r;
                                     <tr style="@(row.IsDuplicate ? "opacity:.5" : "")">
-                                        <td style="padding:4px 10px"><input type="checkbox" @bind="row.Selected" /></td>
+                                        <td style="padding:4px 10px">
+                                            <input type="checkbox" @bind="row.Selected" />
+                                        </td>
                                         <td style="padding:4px 10px">@row.Date.ToString("yyyy-MM-dd")</td>
-                                        <td style="text-align:right;padding:4px 10px;color:@(row.Amount>=0?"var(--color-income)":"var(--color-expense)")">@row.Amount.ToString("N2")</td>
-                                        <td style="padding:4px 10px">@row.Description @(row.IsDuplicate ? "(dublett?)" : "")</td>
+                                        <td style="text-align:right;padding:4px 10px;color:@(row.Amount>=0?"var(--color-income)":"var(--color-expense)")">
+                                            @row.Amount.ToString("N2")
+                                        </td>
+                                        <td style="padding:4px 10px">
+                                            @row.Description @(row.IsDuplicate ? "(dublett?)" : "")
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
@@ -69,7 +98,10 @@
                     </div>
                     <div style="margin-top:10px;display:flex;gap:8px">
                         <button class="btn btn-primary btn-sm" @onclick="ConfirmImport" disabled="@_importing">
-                            @if (_importing) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                            @if (_importing)
+                            {
+                                <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                            }
                             Importera valda (@_preview.Rows.Count(r => r.Selected) st)
                         </button>
                         <button class="btn btn-ghost btn-sm" @onclick="() => _preview = null">Avbryt</button>
@@ -85,7 +117,59 @@
     private ImportPreviewDto? _preview;
     private string? _sessionId;
     private bool _importing;
+    private bool _exporting;
 
+    // ── Export ────────────────────────────────────────────────────────────────
+    // FIX: same root cause as JournalPage. Nav.NavigateTo forceLoad sends the
+    // browser directly — no Authorization header, wrong host port.
+    // Use HttpClient (authenticated) + JS interop downloadFile() instead.
+
+    private async Task ExportPdfAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        _exporting = true;
+        try
+        {
+            var url      = JournalSvc.GetPdfUrl(BudgetState.ActiveBudgetId, Filter.Query);
+            var response = await Http.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Toast.Error($"Export misslyckades ({(int)response.StatusCode}).");
+                return;
+            }
+            var bytes    = await response.Content.ReadAsByteArrayAsync();
+            var base64   = Convert.ToBase64String(bytes);
+            var filename = $"transaktioner_{DateTime.Today:yyyyMMdd}.pdf";
+            await JS.InvokeVoidAsync("downloadFile", filename, "application/pdf", base64);
+        }
+        catch (Exception ex) { Toast.Error($"Export misslyckades: {ex.Message}"); }
+        finally { _exporting = false; }
+    }
+
+    private async Task ExportExcelAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        _exporting = true;
+        try
+        {
+            var url      = JournalSvc.GetExcelUrl(BudgetState.ActiveBudgetId, Filter.Query);
+            var response = await Http.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                Toast.Error($"Export misslyckades ({(int)response.StatusCode}).");
+                return;
+            }
+            var bytes    = await response.Content.ReadAsByteArrayAsync();
+            var base64   = Convert.ToBase64String(bytes);
+            var filename = $"transaktioner_{DateTime.Today:yyyyMMdd}.xlsx";
+            await JS.InvokeVoidAsync("downloadFile", filename,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", base64);
+        }
+        catch (Exception ex) { Toast.Error($"Export misslyckades: {ex.Message}"); }
+        finally { _exporting = false; }
+    }
+
+    // ── Import ────────────────────────────────────────────────────────────────
     private async Task OnFile(InputFileChangeEventArgs e)
     {
         var file = e.File;
@@ -99,11 +183,16 @@
         if (_preview == null || _sessionId == null) return;
         _importing = true;
         var selected = _preview.Rows.Where(r => r.Selected).Select(r => r.RowIndex).ToList();
-        var count = await ImportSvc.ConfirmAsync(BudgetState.ActiveBudgetId, new ConfirmImportDto(selected, 3, _sessionId));
-        Toast.Success($"{count} transaktioner importerade."); _preview = null; _sessionId = null;
-        _importing = false;
+        try
+        {
+            var count = await ImportSvc.ConfirmAsync(
+                BudgetState.ActiveBudgetId,
+                new ConfirmImportDto(selected, 3, _sessionId));
+            Toast.Success($"{count} transaktioner importerade.");
+            _preview   = null;
+            _sessionId = null;
+        }
+        catch (Exception ex) { Toast.Error($"Import misslyckades: {ex.Message}"); }
+        finally { _importing = false; }
     }
-
-    private void ExportPdf()   => Nav.NavigateTo(JournalSvc.GetPdfUrl(BudgetState.ActiveBudgetId, Filter.Query),   forceLoad: true);
-    private void ExportExcel() => Nav.NavigateTo(JournalSvc.GetExcelUrl(BudgetState.ActiveBudgetId, Filter.Query), forceLoad: true);
 }

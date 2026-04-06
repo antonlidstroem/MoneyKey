@@ -1,14 +1,19 @@
 @implements IDisposable
 @inject JournalApiService JournalSvc
-@inject ReceiptApiService ReceiptSvc
+@inject TransactionService TxSvc
+@inject ProjectService ProjectSvc
 @inject ToastService Toast
 @inject BudgetState BudgetState
 @inject JournalFilterState Filter
 @inject SignalRService SignalR
 @inject NavigationManager Nav
+@inject HttpClient Http
+@using BudgetPlanner.Blazor.Components.Filter
+@using BudgetPlanner.Blazor.Components.Forms
 @using BudgetPlanner.Blazor.Components.Shared
 
 <div class="mobile-shell">
+
     <div class="mobile-topbar">
         <span class="mobile-title">@BudgetState.ActiveBudgetName</span>
         <div style="display:flex;gap:6px">
@@ -16,12 +21,9 @@
                 <span class="material-icons">search</span>
             </button>
             <button class="mobile-icon-btn @(Filter.HasActiveFilters ? "active" : "")"
-                    @onclick="() => _filterOpen = true">
+                    @onclick='() => _filterOpen = true'>
                 <span class="material-icons">filter_list</span>
-                @if (Filter.HasActiveFilters)
-                {
-                    <span class="mobile-badge"></span>
-                }
+                @if (Filter.HasActiveFilters) { <span class="mobile-badge"></span> }
             </button>
         </div>
     </div>
@@ -30,8 +32,10 @@
     {
         <div class="mobile-search-bar">
             <span class="material-icons" style="font-size:1rem;color:var(--color-muted)">search</span>
-            <input @ref="_searchRef" placeholder="Sök beskrivning..."
-                   @bind="_searchText" @bind:event="oninput" @bind:after="OnSearch"
+            <input @ref="_searchRef"
+                   placeholder="Sök beskrivning..."
+                   value="@_searchText"
+                   @oninput="OnSearchInput"
                    style="flex:1;border:none;outline:none;background:transparent;font-size:.875rem" />
             <button class="mobile-icon-btn" @onclick="CloseSearch">
                 <span class="material-icons" style="font-size:1rem">close</span>
@@ -42,26 +46,36 @@
     @if (_summary != null)
     {
         <div class="mobile-kpi-strip">
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Inkomster</div><div class="mobile-kpi-val pos">+@((int)_summary.FilteredIncome) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Utgifter</div><div class="mobile-kpi-val neg">@((int)_summary.FilteredExpenses) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Netto</div><div class="mobile-kpi-val @(_summary.FilteredTotal >= 0 ? "pos" : "neg")">@((int)_summary.FilteredTotal) kr</div></div>
-            <div class="mobile-kpi"><div class="mobile-kpi-label">Poster</div><div class="mobile-kpi-val">@_totalCount st</div></div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Inkomster</div>
+                <div class="mobile-kpi-val pos">+@((int)_summary.FilteredIncome) kr</div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Utgifter</div>
+                <div class="mobile-kpi-val neg">@((int)_summary.FilteredExpenses) kr</div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Netto</div>
+                <div class="mobile-kpi-val @(_summary.FilteredTotal >= 0 ? "pos" : "neg")">
+                    @((int)_summary.FilteredTotal) kr
+                </div>
+            </div>
+            <div class="mobile-kpi">
+                <div class="mobile-kpi-label">Poster</div>
+                <div class="mobile-kpi-val">@_totalCount st</div>
+            </div>
         </div>
     }
 
     <div class="mobile-chips">
         <button class="mobile-chip @(!Filter.Query.IncludeTypes.Any() ? "active" : "")"
-                @onclick="Filter.ShowAllTypes">
-            Alla
-        </button>
+                @onclick="() => Filter.ShowAllTypes()">Alla</button>
         @foreach (var t in Enum.GetValues<JournalEntryType>())
         {
-            var type = t;
-            var solo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
-            <button class="mobile-chip @(solo ? "active" : "")"
-                    @onclick="() => Filter.SetOnlyType(type)">
-                @ShortLabel(type)
-            </button>
+            var type  = t;
+            var isSolo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
+            <button class="mobile-chip @(isSolo ? "active" : "")"
+                    @onclick="() => Filter.SetOnlyType(type)">@ShortLabel(type)</button>
         }
     </div>
 
@@ -92,7 +106,7 @@
             @foreach (var entry in _entries)
             {
                 var e = entry;
-                <div class="mobile-row" @onclick="() => _detail = e">
+                <div class="mobile-row" @onclick="() => OpenDetail(e)">
                     <div class="mobile-type-dot @DotCss(e.EntryType)">@e.TypeCode</div>
                     <div class="mobile-row-mid">
                         <div class="mobile-row-desc">
@@ -103,47 +117,40 @@
                             }
                         </div>
                         <div class="mobile-row-meta">
-                            @if (e.MetaLine != null)
-                            {
-                                @e.MetaLine
-                            }
+                            @if (e.MetaLine != null) { @e.MetaLine }
                             else
                             {
-
-                                @(e.CategoryName ?? e.TypeLabel) @if (e.ProjectName != null) {
-                                <span> · @e.ProjectName</span>
+                                @(e.CategoryName ?? e.TypeLabel)
+                                @if (e.ProjectName != null) { <span> · @e.ProjectName</span> }
                             }
-     }
+                        </div>
+                    </div>
+                    <div class="mobile-row-right">
+                        <div class="mobile-row-amount @AmountCss(e)">@FormatAmount(e)</div>
+                        <div class="mobile-row-date">@e.Date.ToString("d MMM")</div>
+                        @if (e.Status != null)
+                        {
+                            <div class="mobile-status-dot @StatusDot(e.Status)"></div>
+                        }
                     </div>
                 </div>
-                <div class="mobile-row-right">
-                    <div class="mobile-row-amount @AmountCss(e)">@FormatAmount(e)</div>
-                    <div class="mobile-row-date">@e.Date.ToString("d MMM")</div>
-                    @if (e.Status != null)
-                    {
-                        <div class="mobile-status-dot @StatusDot(e.Status)"></div>
-                    }
+            }
+
+            @if (Filter.Query.Page < _totalPages)
+            {
+                <div style="text-align:center;padding:16px">
+                    <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
+                        @if (_loadingMore) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                        Ladda fler (@(_totalCount - _entries.Count) kvar)
+                    </button>
                 </div>
-            </div>
+            }
         }
-        @if (Filter.Query.Page < _totalPages)
-        {
-            <div style="text-align:center;padding:16px">
-                <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
-                    @if (_loadingMore)
-                    {
-                        <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
-                    }
-                    Ladda fler (@(_totalCount - _entries.Count) kvar)
-                </button>
-            </div>
-        }
-                }
     </div>
 
     @if (BudgetState.CanEdit)
     {
-        <button class="mobile-fab" @onclick="() => _addOpen = true">
+        <button class="mobile-fab" @onclick='() => _addOpen = true'>
             <span class="material-icons">add</span>
         </button>
     }
@@ -151,144 +158,428 @@
 
 @if (_detail != null)
 {
-    <div class="sheet-overlay" @onclick="() => _detail = null">
+    <div class="sheet-overlay" @onclick="CloseDetail">
         <div class="sheet-container" @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
+
             <div class="sheet-head">
                 <div style="display:flex;align-items:center;gap:8px">
-                    <span class="mobile-type-dot @DotCss(_detail.EntryType)" style="width:24px;height:24px;font-size:.7rem">@_detail.TypeCode</span>
+                    <span class="mobile-type-dot @DotCss(_detail.EntryType)" style="width:24px;height:24px;font-size:.7rem">
+                        @_detail.TypeCode
+                    </span>
                     <span style="font-size:15px;font-weight:500">@_detail.Description</span>
                 </div>
-                <button class="mobile-icon-btn" @onclick="() => _detail = null">
+                <button class="mobile-icon-btn" @onclick="CloseDetail">
                     <span class="material-icons" style="font-size:1.1rem">close</span>
                 </button>
             </div>
+
             <div class="sheet-amount @AmountCss(_detail)">@FormatAmount(_detail)</div>
+
             <div class="sheet-fields">
-                <div class="sheet-field"><span class="sheet-field-label">Datum</span><span class="sheet-field-val">@_detail.Date.ToString("yyyy-MM-dd")</span></div>
-                <div class="sheet-field"><span class="sheet-field-label">Typ</span><span class="sheet-field-val">@_detail.TypeLabel</span></div>
+                <div class="sheet-field">
+                    <span class="sheet-field-label">Datum</span>
+                    <span class="sheet-field-val">@_detail.Date.ToString("yyyy-MM-dd")</span>
+                </div>
+                <div class="sheet-field">
+                    <span class="sheet-field-label">Typ</span>
+                    <span class="sheet-field-val">@_detail.TypeLabel</span>
+                </div>
                 @if (_detail.CategoryName != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Kategori</span><span class="sheet-field-val">@_detail.CategoryName</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Kategori</span>
+                        <span class="sheet-field-val">@_detail.CategoryName</span>
+                    </div>
                 }
                 @if (_detail.ProjectName != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Projekt</span><span class="sheet-field-val">@_detail.ProjectName</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Projekt</span>
+                        <span class="sheet-field-val">@_detail.ProjectName</span>
+                    </div>
                 }
                 @if (_detail.MetaLine != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Detalj</span><span class="sheet-field-val">@_detail.MetaLine</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Detalj</span>
+                        <span class="sheet-field-val">@_detail.MetaLine</span>
+                    </div>
                 }
                 @if (_detail.Status != null)
                 {
-                    <div class="sheet-field"><span class="sheet-field-label">Status</span><span class="sheet-field-val">@_detail.Status</span></div>
+                    <div class="sheet-field">
+                        <span class="sheet-field-label">Status</span>
+                        <span class="sheet-field-val">@_detail.Status</span>
+                    </div>
                 }
                 @if (_detail.ReferenceCode != null)
                 {
                     <div class="sheet-field">
                         <span class="sheet-field-label">Referens</span>
-                        <span class="sheet-field-val" style="font-family:monospace;font-weight:700;color:var(--color-primary)">@_detail.ReferenceCode</span>
+                        <span class="sheet-field-val" style="font-family:monospace;font-weight:700;color:var(--color-primary)">
+                            @_detail.ReferenceCode
+                        </span>
                     </div>
                 }
             </div>
+
+            @if (_detail.KonteringRows.Any())
+            {
+                <div style="padding:0 16px 8px">
+                    <div style="font-size:.7rem;font-weight:600;color:var(--color-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                        Kontering
+                    </div>
+                    @foreach (var k in _detail.KonteringRows)
+                    {
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:.5px solid var(--color-border);font-size:.82rem;gap:10px">
+                            <div>
+                                <span style="font-weight:500;font-family:monospace">@k.KontoNr</span>
+                                @if (k.CostCenter != null) { <span style="color:var(--color-muted)"> · @k.CostCenter</span> }
+                                @if (k.Description != null)
+                                {
+                                    <div style="color:var(--color-muted);font-size:.75rem">@k.Description</div>
+                                }
+                            </div>
+                            <span style="font-weight:500;white-space:nowrap">@k.Amount.ToString("N2") kr</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_confirmingDelete)
+            {
+                <div class="mobile-inline-confirm">
+                    <p>Ta bort denna transaktion? Åtgärden kan inte ångras.</p>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-danger btn-sm" @onclick="ConfirmDeleteAsync" disabled="@_deleting">
+                            @if (_deleting) { <span class="spinner" style="width:12px;height:12px;border-width:2px"></span> }
+                            Ta bort
+                        </button>
+                        <button class="btn btn-secondary btn-sm" @onclick='() => _confirmingDelete = false'>
+                            Avbryt
+                        </button>
+                    </div>
+                </div>
+            }
+
             <div class="sheet-actions">
                 @if (_detail.EntryType == JournalEntryType.ReceiptBatch)
                 {
-                    <button class="btn btn-primary" @onclick='() => { var id = _detail.SourceId; _detail = null; Nav.NavigateTo($"/receipts/{id}"); }'>
+                    var receiptId = _detail.SourceId;
+                    <button class="btn btn-primary"
+                            @onclick='() => { CloseDetail(); Nav.NavigateTo($"/receipts/{receiptId}"); }'>
                         <span class="material-icons" style="font-size:.9rem">open_in_new</span> Öppna underlag
                     </button>
+                }
+
+                @if (BudgetState.CanEdit && _detail.EntryType == JournalEntryType.Transaction)
+                {
+                    @if (_editingId == _detail.SourceId)
+                    {
+                        <button class="btn btn-secondary" disabled>
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary" @onclick="StartEditAsync">
+                            <span class="material-icons" style="font-size:.9rem">edit</span> Redigera
+                        </button>
+                    }
+
+                    @if (!_confirmingDelete)
+                    {
+                        <button class="btn btn-secondary" style="color:var(--color-expense)"
+                                @onclick='() => _confirmingDelete = true'>
+                            <span class="material-icons" style="font-size:.9rem">delete</span> Ta bort
+                        </button>
+                    }
                 }
             </div>
         </div>
     </div>
 }
 
-@* (Add and Filter sheets omitted for brevity, same as user's original but safe) *@
+@if (_editOpen && _editTx != null)
+{
+    <div class="sheet-overlay" @onclick='() => _editOpen = false'>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:0 4px 24px">
+                <TransactionForm EditTransaction="_editTx"
+                                 Projects="_projects"
+                                 OnSaved="OnTransactionSaved"
+                                 OnCancelled='() => _editOpen = false' />
+            </div>
+        </div>
+    </div>
+}
+
+@if (_addOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _addOpen = false'>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:0 4px 24px">
+                <TransactionForm EditTransaction="null"
+                                 Projects="_projects"
+                                 OnSaved="OnTransactionSaved"
+                                 OnCancelled='() => _addOpen = false' />
+            </div>
+        </div>
+    </div>
+}
+
+@if (_filterOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _filterOpen = false'>
+        <div class="sheet-container" style="max-height:85%" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:.5px solid var(--color-border)">
+                <span style="font-weight:500;font-size:.9rem">Filter</span>
+                <button class="mobile-icon-btn" @onclick='() => _filterOpen = false'>
+                    <span class="material-icons" style="font-size:1rem">close</span>
+                </button>
+            </div>
+            <div style="overflow-y:auto;padding:8px 0 24px">
+                <JournalFilterPanel />
+            </div>
+        </div>
+    </div>
+}
 
 @code {
-    private List<JournalEntryDto> _entries = new();
-    private SummaryDto? _summary;
-    private JournalEntryDto? _detail;
-    private ElementReference _searchRef;
-    private string _searchText = "";
-    private bool _loading = true, _loadingMore, _searchOpen, _addOpen, _filterOpen;
-    private int _totalCount, _totalPages;
+    private List<JournalEntryDto> _entries    = new();
+    private List<ProjectDto>      _projects   = new();
+    private SummaryDto?           _summary;
+    private JournalEntryDto?      _detail;
+    private TransactionDto?       _editTx;
+    private ElementReference      _searchRef;
+
+    private string  _searchText       = "";
+    private bool    _loading          = true;
+    private bool    _loadingMore;
+    private bool    _searchOpen;
+    private bool    _filterOpen;
+    private bool    _addOpen;
+    private bool    _editOpen;
+    private bool    _confirmingDelete;
+    private bool    _deleting;
+    private int     _editingId        = -1;
+    private int     _totalCount;
+    private int     _totalPages;
 
     protected override async Task OnInitializedAsync()
     {
-        Filter.FilterChanged += OnFilterChanged;
+        Filter.FilterChanged     += OnFilterChanged;
         BudgetState.StateChanged += OnStateChanged;
-        SignalR.OnBudgetEvent += OnSignalR;
-        await LoadAsync(true);
+        SignalR.OnBudgetEvent    += OnSignalR;
+
+        if (BudgetState.ActiveBudgetId > 0)
+        {
+            try
+            {
+                await LoadProjectsAsync();
+                await LoadAsync(reset: true);
+            }
+            catch (Exception ex)
+            {
+                Toast.Error($"Kunde inte ladda journal: {ex.Message}");
+                _loading = false;
+            }
+        }
+        else
+        {
+            _loading = false;
+        }
     }
 
-    private async void OnFilterChanged() { await LoadAsync(true); await InvokeAsync(StateHasChanged); }
-    private async void OnStateChanged() { await LoadAsync(true); await InvokeAsync(StateHasChanged); }
+    public void Dispose()
+    {
+        Filter.FilterChanged     -= OnFilterChanged;
+        BudgetState.StateChanged -= OnStateChanged;
+        SignalR.OnBudgetEvent    -= OnSignalR;
+    }
+
+    private void OnFilterChanged() => InvokeAsync(async () =>
+    {
+        try   { await LoadAsync(reset: true); }
+        catch (Exception ex) { Toast.Error($"Filterfel: {ex.Message}"); }
+        StateHasChanged();
+    });
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        try
+        {
+            await LoadProjectsAsync();
+            await LoadAsync(reset: true);
+        }
+        catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
+        StateHasChanged();
+    });
+
+    private async Task LoadProjectsAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        try   { _projects = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId) ?? new(); }
+        catch { _projects = new(); }
+    }
 
     private async Task LoadAsync(bool reset)
     {
+        if (BudgetState.ActiveBudgetId <= 0) return;
         if (reset) { Filter.Query.Page = 1; _entries.Clear(); }
         _loading = true;
+
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
         if (r.HasValue)
         {
-            _entries = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
+            _entries    = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
             _totalCount = r.Value.Result.TotalCount;
             _totalPages = r.Value.Result.TotalPages;
-            _summary = r.Value.Summary;
+            _summary    = r.Value.Summary;
         }
         _loading = false;
     }
 
     private async Task LoadMore()
     {
-        _loadingMore = true; Filter.Query.Page++;
-        var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
-        if (r.HasValue) _entries.AddRange(r.Value.Result.Items);
-        _loadingMore = false;
+        _loadingMore = true;
+        Filter.Query.Page++;
+        try
+        {
+            var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
+            if (r.HasValue)
+            {
+                _entries.AddRange(r.Value.Result.Items);
+                _totalCount = r.Value.Result.TotalCount;
+                _totalPages = r.Value.Result.TotalPages;
+            }
+        }
+        catch (Exception ex) { Toast.Error($"Fel vid laddning: {ex.Message}"); }
+        finally { _loadingMore = false; }
     }
 
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
-        await LoadAsync(true); await InvokeAsync(StateHasChanged);
+        try   { await LoadAsync(reset: true); }
+        catch (Exception ex) { Toast.Error($"Realtidsuppdatering misslyckades: {ex.Message}"); }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenDetail(JournalEntryDto entry)
+    {
+        _detail           = entry;
+        _confirmingDelete = false;
+    }
+
+    private void CloseDetail()
+    {
+        _detail           = null;
+        _confirmingDelete = false;
+    }
+
+    private async Task StartEditAsync()
+    {
+        if (_detail == null) return;
+        var sourceId = _detail.SourceId;
+        _editingId   = sourceId;
+        StateHasChanged();
+        try
+        {
+            var full = await Http.GetFromJsonAsync<TransactionDto>(
+                $"api/budgets/{BudgetState.ActiveBudgetId}/transactions/{sourceId}");
+            if (full == null) { Toast.Error("Kunde inte hämta transaktionen."); return; }
+            _editTx   = full;
+            _detail   = null;
+            _editOpen = true;
+        }
+        catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
+        finally { _editingId = -1; StateHasChanged(); }
+    }
+
+    private async Task OnTransactionSaved(TransactionDto _)
+    {
+        _addOpen  = false;
+        _editOpen = false;
+        _editTx   = null;
+        await LoadAsync(reset: true);
+    }
+
+    private async Task ConfirmDeleteAsync()
+    {
+        if (_detail == null) return;
+        _deleting = true;
+        var id = _detail.SourceId;
+        try
+        {
+            await TxSvc.DeleteAsync(BudgetState.ActiveBudgetId, id);
+            Toast.Success("Transaktion borttagen.");
+            CloseDetail();
+            await LoadAsync(reset: true);
+        }
+        catch (Exception ex) { Toast.Error($"Borttagning misslyckades: {ex.Message}"); }
+        finally { _deleting = false; }
     }
 
     private async Task ToggleSearch()
     {
         _searchOpen = !_searchOpen;
-        if (_searchOpen) await Task.Delay(80).ContinueWith(_ => _searchRef.FocusAsync());
+        if (_searchOpen) { await Task.Delay(80); await _searchRef.FocusAsync(); }
     }
 
-    private void CloseSearch() { _searchOpen = false; _searchText = ""; Filter.Update(q => { q.FilterByDescription = false; q.Description = null; }); }
-    private void OnSearch() => Filter.Update(q => { q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText); q.Description = _searchText; });
+    private void CloseSearch()
+    {
+        _searchOpen  = false;
+        _searchText  = "";
+        Filter.Update(q => { q.FilterByDescription = false; q.Description = null; });
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        _searchText = e.Value?.ToString() ?? "";
+        Filter.Update(q =>
+        {
+            q.FilterByDescription = !string.IsNullOrWhiteSpace(_searchText);
+            q.Description         = _searchText;
+        });
+    }
 
     private static string ShortLabel(JournalEntryType t) => t switch
     {
-        JournalEntryType.Transaction => "Transakt.",
+        JournalEntryType.Transaction   => "Transakt.",
         JournalEntryType.Milersattning => "Milersättn.",
-        JournalEntryType.Vab => "VAB",
-        JournalEntryType.ReceiptBatch => "Kvitton",
-        _ => t.ToString()
+        JournalEntryType.Vab           => "VAB",
+        JournalEntryType.ReceiptBatch  => "Kvitton",
+        _                              => t.ToString()
     };
 
     private static string DotCss(JournalEntryType t) => t switch
     {
-        JournalEntryType.Transaction => "dot-tx",
+        JournalEntryType.Transaction   => "dot-tx",
         JournalEntryType.Milersattning => "dot-mi",
-        JournalEntryType.Vab => "dot-vab",
-        JournalEntryType.ReceiptBatch => "dot-kvitto",
-        _ => "dot-tx"
+        JournalEntryType.Vab           => "dot-vab",
+        JournalEntryType.ReceiptBatch  => "dot-kvitto",
+        _                              => "dot-tx"
     };
 
-    private static string AmountCss(JournalEntryDto e) => e.EntryType == JournalEntryType.ReceiptBatch ? "" : e.Amount >= 0 ? "amount-pos" : "amount-neg";
-    private static string FormatAmount(JournalEntryDto e) => e.EntryType == JournalEntryType.ReceiptBatch ? $"{e.Amount:N0} kr" : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
-    private static string StatusDot(string s) => s switch { "Inskickad" => "status-dot-warning", "Godkänd" => "status-dot-success", "Avslagen" => "status-dot-danger", "Utbetald" => "status-dot-info", _ => "" };
+    private static string AmountCss(JournalEntryDto e) =>
+        e.EntryType == JournalEntryType.ReceiptBatch ? "" : e.Amount >= 0 ? "amount-pos" : "amount-neg";
 
-    public void Dispose()
+    private static string FormatAmount(JournalEntryDto e) =>
+        e.EntryType == JournalEntryType.ReceiptBatch
+            ? $"{e.Amount:N0} kr"
+            : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
+
+    private static string StatusDot(string s) => s switch
     {
-        Filter.FilterChanged -= OnFilterChanged;
-        BudgetState.StateChanged -= OnStateChanged;
-        SignalR.OnBudgetEvent -= OnSignalR;
-    }
+        "Inskickad" => "status-dot-warning",
+        "Godkänd"   => "status-dot-success",
+        "Avslagen"  => "status-dot-danger",
+        "Utbetald"  => "status-dot-info",
+        _           => ""
+    };
 }

@@ -5,20 +5,18 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.SignalR.Client;
 using BudgetPlanner.Core.DTOs;
-using BudgetPlanner.Core.Services;
-using BudgetPlanner.DAL.Repositories;
 using BudgetPlanner.Domain.Enums;
 using BudgetPlanner.Domain.Models;
 using Microsoft.Extensions.Configuration;
 
 namespace BudgetPlanner.Blazor.Services;
 
+// ─── JWT AUTH STATE PROVIDER ──────────────────────────────────────────────────
 public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 {
-    private static string? _accessToken;
+    private static string?  _accessToken;
     private static UserDto? _currentUser;
 
-    // Vi skapar en dedikerad HttpClient för just auth-anrop för att bryta cirkeln i DI
     private readonly HttpClient _authClient;
 
     public JwtAuthenticationStateProvider(IConfiguration config)
@@ -27,8 +25,8 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
         _authClient = new HttpClient { BaseAddress = new Uri(apiBase) };
     }
 
-    public static string? AccessToken => _accessToken;
-    public static UserDto? CurrentUser => _currentUser;
+    public static string?  AccessToken  => _accessToken;
+    public static UserDto? CurrentUser  => _currentUser;
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
@@ -37,7 +35,6 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
         try
         {
-            // Vi använder _authClient (utan handler) för att undvika cirkulära beroenden
             var r = await _authClient.PostAsync("api/auth/refresh", null);
             if (r.IsSuccessStatusCode)
             {
@@ -53,13 +50,15 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
 
     public void SetToken(string token, UserDto user)
     {
-        _accessToken = token; _currentUser = user;
+        _accessToken = token;
+        _currentUser = user;
         NotifyAuthenticationStateChanged(Task.FromResult(Build(token)));
     }
 
     public void ClearToken()
     {
-        _accessToken = null; _currentUser = null;
+        _accessToken = null;
+        _currentUser = null;
         NotifyAuthenticationStateChanged(Task.FromResult(Anonymous()));
     }
 
@@ -67,9 +66,8 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     {
         try
         {
-            var handler = new JwtSecurityTokenHandler();
-            var jwt = handler.ReadJwtToken(token);
-            var id = new ClaimsIdentity(jwt.Claims, "jwt");
+            var jwt = new JwtSecurityTokenHandler().ReadJwtToken(token);
+            var id  = new ClaimsIdentity(jwt.Claims, "jwt");
             return new AuthenticationState(new ClaimsPrincipal(id));
         }
         catch { return Anonymous(); }
@@ -89,59 +87,79 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
     }
 }
 
+// ─── AUTH MESSAGE HANDLER ─────────────────────────────────────────────────────
 public class AuthorizationMessageHandler : DelegatingHandler
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceProvider _sp;
     private bool _refreshing;
 
-    public AuthorizationMessageHandler(IServiceProvider serviceProvider)
-    {
-        _serviceProvider = serviceProvider;
-    }
+    public AuthorizationMessageHandler(IServiceProvider sp) => _sp = sp;
 
-    protected override async Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request, CancellationToken ct)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
+        // Buffer so the request body can be re-sent after a 401 refresh.
+        if (request.Content != null)
+            await request.Content.LoadIntoBufferAsync();
+
         if (!string.IsNullOrEmpty(JwtAuthenticationStateProvider.AccessToken))
             request.Headers.Authorization =
                 new AuthenticationHeaderValue("Bearer", JwtAuthenticationStateProvider.AccessToken);
 
         var response = await base.SendAsync(request, ct);
 
-        // Skydd: Försök inte refresha om det redan är ett auth-anrop som misslyckas
-        var isAuthRequest = request.RequestUri?.AbsolutePath.Contains("/api/auth/") ?? false;
+        var isAuthEndpoint = request.RequestUri?.AbsolutePath
+            .Contains("/api/auth/", StringComparison.OrdinalIgnoreCase) ?? false;
 
-        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized && !isAuthRequest && !_refreshing)
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized
+            && !isAuthEndpoint && !_refreshing)
         {
             _refreshing = true;
             try
             {
-                // Hämta providern lazily för att undvika cirkulär DI vid uppstart
-                var authProvider = (JwtAuthenticationStateProvider)_serviceProvider
+                var provider = (JwtAuthenticationStateProvider)_sp
                     .GetRequiredService<AuthenticationStateProvider>();
-
-                await authProvider.GetAuthenticationStateAsync();
+                await provider.GetAuthenticationStateAsync();
 
                 if (!string.IsNullOrEmpty(JwtAuthenticationStateProvider.AccessToken))
                 {
-                    request.Headers.Authorization =
+                    var retry = await CloneRequestAsync(request);
+                    retry.Headers.Authorization =
                         new AuthenticationHeaderValue("Bearer", JwtAuthenticationStateProvider.AccessToken);
-                    response = await base.SendAsync(request, ct);
+                    response = await base.SendAsync(retry, ct);
                 }
             }
             finally { _refreshing = false; }
         }
+
         return response;
+    }
+
+    private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage src)
+    {
+        var clone = new HttpRequestMessage(src.Method, src.RequestUri);
+        foreach (var h in src.Headers)
+            clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+
+        if (src.Content != null)
+        {
+            var ms = new MemoryStream();
+            await src.Content.CopyToAsync(ms);
+            ms.Position   = 0;
+            clone.Content = new StreamContent(ms);
+            foreach (var h in src.Content.Headers)
+                clone.Content.Headers.TryAddWithoutValidation(h.Key, h.Value);
+        }
+        return clone;
     }
 }
 
+// ─── BASE API SERVICE ─────────────────────────────────────────────────────────
 public abstract class ApiServiceBase
 {
     protected readonly HttpClient Http;
     protected ApiServiceBase(HttpClient http) => Http = http;
 
-    protected Task<T?> GetAsync<T>(string url) =>
-        Http.GetFromJsonAsync<T>(url);
+    protected Task<T?> GetAsync<T>(string url) => Http.GetFromJsonAsync<T>(url);
 
     protected async Task<T?> PostAsync<T>(string url, object body)
     {
@@ -157,9 +175,11 @@ public abstract class ApiServiceBase
     }
 }
 
+// ─── AUTH SERVICE ─────────────────────────────────────────────────────────────
 public class AuthService : ApiServiceBase
 {
     private readonly JwtAuthenticationStateProvider _provider;
+
     public AuthService(HttpClient http, JwtAuthenticationStateProvider provider) : base(http)
         => _provider = provider;
 
@@ -183,33 +203,67 @@ public class AuthService : ApiServiceBase
         _provider.ClearToken();
     }
 
+    public async Task<AuthResultDto?> AcceptInviteAsync(string token)
+    {
+        var response = await Http.PostAsJsonAsync("api/auth/accept-invite", new AcceptInviteDto(token));
+        if (!response.IsSuccessStatusCode)
+        {
+            var err = await response.Content.ReadFromJsonAsync<ApiError>();
+            throw new Exception(err?.Message ?? "Kunde inte acceptera inbjudan.");
+        }
+        var result = await response.Content.ReadFromJsonAsync<AuthResultDto>();
+        if (result != null) _provider.SetToken(result.AccessToken, result.User);
+        return result;
+    }
+
     public UserDto? CurrentUser => JwtAuthenticationStateProvider.CurrentUser;
+
+    private record ApiError(string Message);
 }
 
+// ─── BUDGET SERVICE ───────────────────────────────────────────────────────────
 public class BudgetService : ApiServiceBase
 {
     public BudgetService(HttpClient http) : base(http) { }
-    public Task<List<BudgetDto>?> GetMyBudgetsAsync() => GetAsync<List<BudgetDto>>("api/budgets");
-    public Task<BudgetDto?> CreateAsync(CreateBudgetDto dto) => PostAsync<BudgetDto>("api/budgets", dto);
+
+    public Task<List<BudgetDto>?> GetMyBudgetsAsync() =>
+        GetAsync<List<BudgetDto>>("api/budgets");
+
+    public Task<BudgetDto?> CreateAsync(CreateBudgetDto dto) =>
+        PostAsync<BudgetDto>("api/budgets", dto);
+
     public Task<List<Category>?> GetCategoriesAsync(int budgetId) =>
         GetAsync<List<Category>>($"api/budgets/{budgetId}/categories");
+
     public async Task InviteAsync(int budgetId, InviteMemberDto dto) =>
         await PostAsync<object>($"api/budgets/{budgetId}/invite", dto);
+
+    public async Task UpdateAsync(int budgetId, UpdateBudgetDto dto)
+    {
+        var r = await Http.PutAsJsonAsync($"api/budgets/{budgetId}", dto);
+        r.EnsureSuccessStatusCode();
+    }
 }
 
+// ─── PROJECT SERVICE ──────────────────────────────────────────────────────────
 public class ProjectService : ApiServiceBase
 {
     public ProjectService(HttpClient http) : base(http) { }
+
     public Task<List<ProjectDto>?> GetAllAsync(int budgetId) =>
         GetAsync<List<ProjectDto>>($"api/budgets/{budgetId}/projects");
+
     public Task<ProjectDto?> GetByIdAsync(int budgetId, int projectId) =>
         GetAsync<ProjectDto>($"api/budgets/{budgetId}/projects/{projectId}");
+
     public Task<ProjectDto?> CreateAsync(int budgetId, CreateProjectDto dto) =>
         PostAsync<ProjectDto>($"api/budgets/{budgetId}/projects", dto);
+
     public async Task DeleteAsync(int budgetId, int id) =>
         await DeleteAsync($"api/budgets/{budgetId}/projects/{id}");
 }
 
+// ─── TRANSACTION SERVICE ──────────────────────────────────────────────────────
 public class TransactionService : ApiServiceBase
 {
     public TransactionService(HttpClient http) : base(http) { }
@@ -229,19 +283,35 @@ public class TransactionService : ApiServiceBase
 
     public async Task BatchDeleteAsync(int budgetId, List<int> ids)
     {
-        var r = await Http.PostAsJsonAsync($"api/budgets/{budgetId}/transactions/batch-delete", new BatchDeleteDto(ids));
+        var r = await Http.PostAsJsonAsync(
+            $"api/budgets/{budgetId}/transactions/batch-delete",
+            new BatchDeleteDto(ids));
         r.EnsureSuccessStatusCode();
     }
 }
 
+// ─── JOURNAL API SERVICE ──────────────────────────────────────────────────────
+// Matches the controller response shape:
+//   { result: PagedResult<JournalEntryDto>, summary: SummaryDto }
 public class JournalApiService : ApiServiceBase
 {
     public JournalApiService(HttpClient http) : base(http) { }
 
+    // FIX: Use Http.GetAsync + manual status check instead of GetFromJsonAsync.
+    // GetFromJsonAsync in .NET 8 calls EnsureSuccessStatusCode() internally,
+    // so any server error throws HttpRequestException instead of returning null.
+    // Returning null here lets callers treat a server error as "no data" and
+    // show the error state rather than crashing the component.
     public async Task<(PagedResult<JournalEntryDto> Result, SummaryDto Summary)?> GetPagedAsync(
         int budgetId, JournalQuery query)
     {
-        var raw = await GetAsync<JournalPageResponse>(BuildUrl(budgetId, query));
+        var url = BuildUrl(budgetId, query);
+        var response = await Http.GetAsync(url);
+
+        if (!response.IsSuccessStatusCode)
+            return null;   // caller checks HasValue; no exception thrown
+
+        var raw = await response.Content.ReadFromJsonAsync<JournalPageResponse>();
         return raw == null ? null : (raw.Result, raw.Summary);
     }
 
@@ -255,28 +325,50 @@ public class JournalApiService : ApiServiceBase
     {
         var parts = new List<string>
         {
-            $"page={q.Page}", $"pageSize={q.PageSize}",
-            $"sortBy={q.SortBy ?? "Date"}", $"sortDir={q.SortDir ?? "desc"}"
+            $"page={q.Page}",
+            $"pageSize={q.PageSize}",
+            $"sortBy={Uri.EscapeDataString(q.SortBy ?? "Date")}",
+            $"sortDir={Uri.EscapeDataString(q.SortDir ?? "desc")}"
         };
-        foreach (var t in q.IncludeTypes) parts.Add($"includeTypes={t}");
-        foreach (var s in q.ReceiptStatuses) parts.Add($"receiptStatuses={s}");
+
+        foreach (var t in q.IncludeTypes)
+            parts.Add($"includeTypes={t}");
+
+        foreach (var s in q.ReceiptStatuses)
+            parts.Add($"receiptStatuses={s}");
+
         parts.AddRange(FilterParts(q));
+
         return $"api/budgets/{budgetId}/journal?" + string.Join("&", parts);
     }
 
-    private static string FilterParams(JournalQuery q) => string.Join("&", FilterParts(q));
+    private static string FilterParams(JournalQuery q) =>
+        string.Join("&", FilterParts(q));
 
     private static List<string> FilterParts(JournalQuery q)
     {
         var p = new List<string>();
-        if (q.FilterByStartDate && q.StartDate.HasValue) p.Add($"filterByStartDate=true&startDate={q.StartDate:yyyy-MM-dd}");
-        if (q.FilterByEndDate && q.EndDate.HasValue) p.Add($"filterByEndDate=true&endDate={q.EndDate:yyyy-MM-dd}");
-        if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description)) p.Add($"filterByDescription=true&description={Uri.EscapeDataString(q.Description)}");
-        if (q.FilterByCategory && q.CategoryId.HasValue) p.Add($"filterByCategory=true&categoryId={q.CategoryId}");
-        if (q.FilterByProject && q.ProjectId.HasValue) p.Add($"filterByProject=true&projectId={q.ProjectId}");
+
+        if (q.FilterByStartDate && q.StartDate.HasValue)
+            p.Add($"filterByStartDate=true&startDate={q.StartDate.Value:yyyy-MM-dd}");
+
+        if (q.FilterByEndDate && q.EndDate.HasValue)
+            p.Add($"filterByEndDate=true&endDate={q.EndDate.Value:yyyy-MM-dd}");
+
+        if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description))
+            p.Add($"filterByDescription=true&description={Uri.EscapeDataString(q.Description)}");
+
+        if (q.FilterByCategory && q.CategoryId.HasValue)
+            p.Add($"filterByCategory=true&categoryId={q.CategoryId.Value}");
+
+        if (q.FilterByProject && q.ProjectId.HasValue)
+            p.Add($"filterByProject=true&projectId={q.ProjectId.Value}");
+
         return p;
     }
 
+    // Property names match the JSON the JournalController returns (camelCase,
+    // case-insensitive deserialization is the ASP.NET Core default).
     private class JournalPageResponse
     {
         public PagedResult<JournalEntryDto> Result { get; set; } = new();
@@ -284,12 +376,18 @@ public class JournalApiService : ApiServiceBase
     }
 }
 
+// ─── RECEIPT API SERVICE ──────────────────────────────────────────────────────
 public class ReceiptApiService : ApiServiceBase
 {
     public ReceiptApiService(HttpClient http) : base(http) { }
 
-    public Task<PagedResult<ReceiptBatchDto>?> GetAllAsync(int budgetId, int page = 1, int pageSize = 50) =>
-        GetAsync<PagedResult<ReceiptBatchDto>>($"api/budgets/{budgetId}/receipts?page={page}&pageSize={pageSize}");
+    public Task<PagedResult<ReceiptBatchDto>?> GetAllAsync(
+        int budgetId, int page = 1, int pageSize = 25, ReceiptBatchStatus? status = null)
+    {
+        var url = $"api/budgets/{budgetId}/receipts?page={page}&pageSize={pageSize}";
+        if (status.HasValue) url += $"&statuses={(int)status.Value}";
+        return GetAsync<PagedResult<ReceiptBatchDto>>(url);
+    }
 
     public Task<ReceiptBatchDto?> GetByIdAsync(int budgetId, int batchId) =>
         GetAsync<ReceiptBatchDto>($"api/budgets/{budgetId}/receipts/{batchId}");
@@ -307,7 +405,7 @@ public class ReceiptApiService : ApiServiceBase
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}");
 
     public Task<ReceiptLineDto?> AddLineAsync(int budgetId, int batchId, CreateReceiptLineDto dto) =>
-    PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
+        PostAsync<ReceiptLineDto>($"api/budgets/{budgetId}/receipts/{batchId}/lines", dto);
 
     public async Task DeleteLineAsync(int budgetId, int batchId, int lineId) =>
         await DeleteAsync($"api/budgets/{budgetId}/receipts/{batchId}/lines/{lineId}");
@@ -329,34 +427,45 @@ public class ReceiptApiService : ApiServiceBase
         $"api/budgets/{budgetId}/receipts/{batchId}/export/pdf";
 }
 
+// ─── MILERSÄTTNING API SERVICE ────────────────────────────────────────────────
 public class MilersattningApiService : ApiServiceBase
 {
     public MilersattningApiService(HttpClient http) : base(http) { }
+
     public Task<List<MilersattningDto>?> GetAllAsync(int budgetId) =>
         GetAsync<List<MilersattningDto>>($"api/budgets/{budgetId}/milersattning");
+
     public Task<MilersattningDto?> CreateAsync(int budgetId, CreateMilersattningDto dto) =>
         PostAsync<MilersattningDto>($"api/budgets/{budgetId}/milersattning", dto);
+
     public async Task DeleteAsync(int budgetId, int id) =>
         await DeleteAsync($"api/budgets/{budgetId}/milersattning/{id}");
+
     public async Task<decimal> GetRateAsync(int budgetId)
     {
         var r = await GetAsync<RateWrapper>($"api/budgets/{budgetId}/milersattning/rate");
         return r?.Rate ?? 0.25m;
     }
+
     private class RateWrapper { public decimal Rate { get; set; } }
 }
 
+// ─── VAB API SERVICE ──────────────────────────────────────────────────────────
 public class VabApiService : ApiServiceBase
 {
     public VabApiService(HttpClient http) : base(http) { }
+
     public Task<List<VabDto>?> GetAllAsync(int budgetId) =>
         GetAsync<List<VabDto>>($"api/budgets/{budgetId}/vab");
+
     public Task<VabDto?> CreateAsync(int budgetId, CreateVabDto dto) =>
         PostAsync<VabDto>($"api/budgets/{budgetId}/vab", dto);
+
     public async Task DeleteAsync(int budgetId, int id) =>
         await DeleteAsync($"api/budgets/{budgetId}/vab/{id}");
 }
 
+// ─── IMPORT API SERVICE ───────────────────────────────────────────────────────
 public class ImportApiService : ApiServiceBase
 {
     public ImportApiService(HttpClient http) : base(http) { }
@@ -365,7 +474,8 @@ public class ImportApiService : ApiServiceBase
     {
         using var content = new MultipartFormDataContent();
         content.Add(new StreamContent(stream), "file", fileName);
-        var r = await Http.PostAsync($"api/budgets/{budgetId}/import/preview?bankProfile={bankProfile}", content);
+        var r = await Http.PostAsync(
+            $"api/budgets/{budgetId}/import/preview?bankProfile={bankProfile}", content);
         r.EnsureSuccessStatusCode();
         return await r.Content.ReadFromJsonAsync<ImportSessionDto>();
     }
@@ -377,23 +487,30 @@ public class ImportApiService : ApiServiceBase
         var res = await r.Content.ReadFromJsonAsync<ImportResult>();
         return res?.Imported ?? 0;
     }
+
     private class ImportResult { public int Imported { get; set; } }
 }
 
+// ─── REPORTS API SERVICE ──────────────────────────────────────────────────────
 public class ReportsApiService : ApiServiceBase
 {
     public ReportsApiService(HttpClient http) : base(http) { }
+
     public Task<MonthlySummary?> GetMonthlySummaryAsync(int budgetId, int year) =>
         GetAsync<MonthlySummary>($"api/budgets/{budgetId}/reports/monthly-summary?year={year}");
-    public Task<List<CategoryBreakdownItem>?> GetCategoryBreakdownAsync(int budgetId, DateTime? from, DateTime? to)
+
+    public Task<List<CategoryBreakdownItem>?> GetCategoryBreakdownAsync(
+        int budgetId, DateTime? from, DateTime? to)
     {
         var url = $"api/budgets/{budgetId}/reports/category-breakdown";
-        if (from.HasValue) url += $"?from={from:yyyy-MM-dd}";
-        if (to.HasValue) url += (from.HasValue ? "&" : "?") + $"to={to:yyyy-MM-dd}";
+        var sep = "?";
+        if (from.HasValue) { url += $"{sep}from={from.Value:yyyy-MM-dd}"; sep = "&"; }
+        if (to.HasValue)   { url += $"{sep}to={to.Value:yyyy-MM-dd}"; }
         return GetAsync<List<CategoryBreakdownItem>>(url);
     }
 }
 
+// ─── TOAST SERVICE ────────────────────────────────────────────────────────────
 public class ToastService
 {
     public List<ToastMessage> Toasts { get; } = new();
@@ -404,20 +521,30 @@ public class ToastService
         var id = Guid.NewGuid().ToString();
         Toasts.Add(new ToastMessage
         {
-            Id = id,
+            Id      = id,
             Message = message,
-            Type = type,
-            Icon = type switch { "success" => "check_circle", "error" => "error", _ => "info" }
+            Type    = type,
+            Icon    = type switch { "success" => "check_circle", "error" => "error", _ => "info" }
         });
         OnChange?.Invoke();
         _ = Task.Delay(durationMs).ContinueWith(_ => { Remove(id); });
     }
 
     public void Success(string m) => Show(m, "success");
-    public void Error(string m) => Show(m, "error");
-    public void Info(string m) => Show(m, "info");
+    public void Error(string m)   => Show(m, "error");
+    public void Info(string m)    => Show(m, "info");
 
-    public void Remove(string id) { Toasts.RemoveAll(t => t.Id == id); OnChange?.Invoke(); }
+    public void Remove(string id)
+    {
+        Toasts.RemoveAll(t => t.Id == id);
+        OnChange?.Invoke();
+    }
 }
 
-public class ToastMessage { public string Id { get; set; } = ""; public string Message { get; set; } = ""; public string Type { get; set; } = "info"; public string Icon { get; set; } = "info"; }
+public class ToastMessage
+{
+    public string Id      { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Type    { get; set; } = "info";
+    public string Icon    { get; set; } = "info";
+}

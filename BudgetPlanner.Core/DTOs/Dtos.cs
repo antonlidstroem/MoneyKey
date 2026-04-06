@@ -7,6 +7,8 @@ public record RegisterDto(string Email, string Password, string FirstName, strin
 public record LoginDto(string Email, string Password);
 public record AuthResultDto(string AccessToken, UserDto User);
 public record UserDto(string Id, string Email, string FirstName, string LastName, List<BudgetMembershipDto> Memberships);
+/// <summary>Token sent by the accept-invite page to claim an invitation.</summary>
+public record AcceptInviteDto(string Token);
 
 // ─── BUDGET ───────────────────────────────────────────────────────────────────
 public record BudgetDto(int Id, string Name, string? Description, bool IsActive, DateTime CreatedAt, BudgetMemberRole MyRole);
@@ -243,7 +245,6 @@ public class SummaryDto
     public decimal MonthlyTotal => MonthlyIncome + MonthlyExpenses;
 }
 
-// FIX #2: MonthlySummary moved from DAL to Core.DTOs so Blazor can reference it
 public class MonthlySummary
 {
     public List<MonthlyRow> Rows { get; set; } = new();
@@ -304,6 +305,8 @@ public class ImportRowDto
     public bool Selected { get; set; } = true;
     public int? SuggestedCategoryId { get; set; }
     public string? SuggestedCategoryName { get; set; }
+
+    public string? CategoryName { get; set; }
 }
 
 public record ConfirmImportDto(List<int> SelectedRowIndices, int DefaultCategoryId, string SessionId);

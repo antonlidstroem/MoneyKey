@@ -89,7 +89,10 @@ public interface ICategoryRepository
 
 public interface IProjectRepository
 {
-    Task<List<Project>> GetForBudgetAsync(int budgetId);
+    /// <summary>Returns all projects for a budget with their total spent amount
+    /// in a single SQL query (LEFT JOIN + SUM).</summary>
+    Task<List<(Project Project, decimal SpentAmount)>> GetForBudgetWithSpentAsync(int budgetId);
+
     Task<Project?> GetByIdAsync(int id, int budgetId);
     Task<Project> CreateAsync(Project project);
     Task<Project> UpdateAsync(Project project);
@@ -309,8 +312,29 @@ public class ProjectRepository : IProjectRepository
     private readonly BudgetDbContext _db;
     public ProjectRepository(BudgetDbContext db) => _db = db;
 
-    public async Task<List<Project>> GetForBudgetAsync(int budgetId) =>
-        await _db.Projects.Where(p => p.BudgetId == budgetId).OrderByDescending(p => p.CreatedAt).ToListAsync();
+    /// <summary>
+    /// Single query: projects LEFT JOIN transactions GROUP BY projectId.
+    /// Replaces the old pattern that looped and issued one query per project.
+    /// </summary>
+    public async Task<List<(Project Project, decimal SpentAmount)>> GetForBudgetWithSpentAsync(int budgetId)
+    {
+        // Pull projects with their transactions in one round-trip using EF navigation.
+        var projects = await _db.Projects
+            .Where(p => p.BudgetId == budgetId)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new
+            {
+                Project = p,
+                SpentAmount = _db.Transactions
+                    .Where(t => t.ProjectId == p.Id && t.BudgetId == budgetId)
+                    .Sum(t => (decimal?)t.NetAmount) ?? 0m
+            })
+            .ToListAsync();
+
+        return projects
+            .Select(x => (x.Project, x.SpentAmount))
+            .ToList();
+    }
 
     public async Task<Project?> GetByIdAsync(int id, int budgetId) =>
         await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && p.BudgetId == budgetId);

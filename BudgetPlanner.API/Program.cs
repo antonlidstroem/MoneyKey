@@ -16,13 +16,30 @@ var builder = WebApplication.CreateBuilder(args);
 var cfg  = builder.Configuration;
 var svcs = builder.Services;
 
+// ── Fail-fast: validate critical secrets before any service is registered ────
+var jwtSecret = cfg["Jwt:Secret"];
+if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
+    throw new InvalidOperationException(
+        "Jwt:Secret must be configured and at least 32 characters. " +
+        "Use 'dotnet user-secrets' in development or environment variables in production. " +
+        "Example: dotnet user-secrets set \"Jwt:Secret\" \"$(openssl rand -base64 48)\"");
+
+var connStr = cfg.GetConnectionString("DefaultConnection");
+if (string.IsNullOrWhiteSpace(connStr))
+    throw new InvalidOperationException(
+        "ConnectionStrings:DefaultConnection must be configured. " +
+        "Use 'dotnet user-secrets set \"ConnectionStrings:DefaultConnection\" \"...\"'");
+
+// ── Infrastructure ────────────────────────────────────────────────────────────
 svcs.AddHttpContextAccessor();
-// FIX BUG 1: Register against the DAL interface — the one AuditInterceptor is injected with.
+svcs.AddMemoryCache();  // required by ImportService session store
+
+// FIX: Register against the DAL interface — the one AuditInterceptor is injected with.
 svcs.AddScoped<BudgetPlanner.DAL.Data.ICurrentUserAccessor, HttpCurrentUserAccessor>();
 svcs.AddScoped<AuditInterceptor>();
 
 svcs.AddDbContext<BudgetDbContext>((sp, opt) =>
-    opt.UseSqlServer(cfg.GetConnectionString("DefaultConnection"),
+    opt.UseSqlServer(connStr,
             sql => sql.MigrationsAssembly("BudgetPlanner.DAL"))
         .AddInterceptors(sp.GetRequiredService<AuditInterceptor>()));
 
@@ -36,9 +53,8 @@ svcs.AddIdentity<ApplicationUser, IdentityRole>(opt =>
 .AddEntityFrameworkStores<BudgetDbContext>()
 .AddDefaultTokenProviders();
 
-// ─── JWT (FIX #1: removed custom JwtRegisteredClaimNames class; use framework) ─
+// ── JWT ────────────────────────────────────────────────────────────────────────
 var jwtSection = cfg.GetSection("Jwt");
-var jwtSecret  = jwtSection["Secret"] ?? throw new InvalidOperationException("JWT Secret not configured");
 
 svcs.AddAuthentication(opt =>
 {
@@ -88,7 +104,7 @@ svcs.AddRateLimiter(opt =>
 
 svcs.AddSignalR();
 
-// Repositories
+// ── Repositories ───────────────────────────────────────────────────────────────
 svcs.AddScoped<ITransactionRepository,   TransactionRepository>();
 svcs.AddScoped<IBudgetRepository,        BudgetRepository>();
 svcs.AddScoped<ICategoryRepository,      CategoryRepository>();
@@ -100,7 +116,7 @@ svcs.AddScoped<IReceiptRepository,       ReceiptRepository>();
 svcs.AddScoped<IAuditRepository,         AuditRepository>();
 svcs.AddScoped<IAppSettingRepository,    AppSettingRepository>();
 
-// Services
+// ── Services ───────────────────────────────────────────────────────────────────
 svcs.AddScoped<TokenService>();
 svcs.AddScoped<BudgetAuthorizationService>();
 svcs.AddScoped<MilersattningService>();
@@ -112,7 +128,7 @@ svcs.AddScoped<ReceiptService>();
 svcs.AddScoped<JournalQueryService>();
 svcs.AddScoped<IReceiptAttachmentService, NoOpReceiptAttachmentService>();
 
-// Email
+// ── Email ─────────────────────────────────────────────────────────────────────
 var emailOpts = cfg.GetSection("Email").Get<EmailOptions>() ?? new EmailOptions();
 svcs.AddSingleton(emailOpts);
 svcs.AddScoped<IEmailService, MailKitEmailService>();
@@ -137,11 +153,16 @@ svcs.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
+// ── Migrate + seed ─────────────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     scope.ServiceProvider.GetRequiredService<BudgetDbContext>().Database.Migrate();
 }
+
+// Create first-run admin only when the database is empty (no users).
+// Credentials come from AdminSetup config — never from source code.
+await DbInitializer.InitializeAsync(app.Services);
 
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "BudgetPlanner API v1"));
