@@ -1,0 +1,150 @@
+@page "/lists/public/{Token}"
+@layout EmptyLayout
+@inject IHttpClientFactory HttpFactory
+
+<!--
+    PUBLIC READ-ONLY LIST VIEW — no authentication required.
+    Uses a named HttpClient "PublicClient" with no AuthorizationMessageHandler
+    so no Bearer token is sent and no exception is thrown when unauthenticated.
+
+    Register in BudgetPlanner.Blazor/Program.cs (no AddHttpMessageHandler!):
+        builder.Services.AddHttpClient("PublicClient", c =>
+            c.BaseAddress = new Uri(
+                builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7000/"));
+-->
+
+<div class="public-list-shell">
+    @if (_loading)
+    {
+        <div style="text-align:center;padding:60px 0">
+            <div class="spinner"></div>
+        </div>
+    }
+    else if (_list == null)
+    {
+        <div style="text-align:center;padding:60px 0;color:var(--color-muted)">
+            <span style="font-size:3rem;display:block;margin-bottom:12px">🔗</span>
+            <div style="font-size:1.1rem;font-weight:500;margin-bottom:8px">
+                Lista hittades inte
+            </div>
+            <div style="font-size:.85rem">
+                Länken kan vara felaktig eller listan kan ha arkiverats.
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="public-list-header">
+            <span class="public-list-emoji">@_list.Emoji</span>
+            <div class="public-list-title">@_list.Title</div>
+            <div class="public-list-meta">
+                @_list.ProgressLabel · @TypeLabel(_list.ListType)
+            </div>
+            @if (_list.TotalItems > 0)
+            {
+                <div style="height:5px;background:#e0e0e0;border-radius:3px;
+                            margin:12px auto 0;max-width:200px;overflow:hidden">
+                    <div style="height:100%;width:@_list.ProgressPercent%;
+                                background:@_list.ColorHex;border-radius:3px;
+                                transition:width .4s">
+                    </div>
+                </div>
+            }
+        </div>
+
+        @{
+            var activeItems  = _list.Items.Where(i => !i.IsChecked)
+                                          .OrderBy(i => i.SortOrder).ToList();
+            var checkedItems = _list.Items.Where(i => i.IsChecked)
+                                          .OrderByDescending(i => i.CheckedAt).ToList();
+        }
+
+        <div style="border-radius:12px;border:.5px solid var(--color-border);
+                    overflow:hidden;margin-bottom:16px;background:var(--color-surface)">
+            @if (!activeItems.Any())
+            {
+                <div style="padding:16px;text-align:center;font-size:.85rem;
+                            color:var(--color-muted)">
+                    Alla uppgifter är klara! 🎉
+                </div>
+            }
+            @foreach (var item in activeItems)
+            {
+                <div style="display:flex;align-items:center;gap:12px;padding:13px 16px;
+                            border-bottom:.5px solid var(--color-border)">
+                    <div style="width:22px;height:22px;border-radius:50%;
+                                border:2px solid @_list.ColorHex;flex-shrink:0">
+                    </div>
+                    <span style="font-size:.9rem;color:var(--color-dark)">@item.Text</span>
+                </div>
+            }
+        </div>
+
+        @if (checkedItems.Any())
+        {
+            <div style="font-size:.78rem;font-weight:600;color:var(--color-muted);
+                        text-transform:uppercase;letter-spacing:.05em;
+                        margin-bottom:8px;padding-left:4px">
+                @(_list.ListType == TaskListType.Shopping ? "Köpt" : "Klara")
+                (@checkedItems.Count)
+            </div>
+            <div style="border-radius:12px;border:.5px solid var(--color-border);
+                        overflow:hidden;background:var(--color-surface);opacity:.6">
+                @foreach (var item in checkedItems)
+                {
+                    <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;
+                                border-bottom:.5px solid var(--color-border)">
+                        <div style="width:22px;height:22px;border-radius:50%;
+                                    background:@_list.ColorHex;flex-shrink:0;
+                                    display:flex;align-items:center;justify-content:center">
+                            <span class="material-icons"
+                                  style="font-size:.8rem;color:#fff">check</span>
+                        </div>
+                        <span style="font-size:.9rem;color:var(--color-muted);
+                                     text-decoration:line-through">@item.Text</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <div style="text-align:center;margin-top:32px;font-size:.78rem;color:var(--color-muted)">
+            Delas via BudgetPlanner · Skrivskyddad vy
+            <br />
+            <button class="btn btn-ghost btn-sm" style="margin-top:8px" @onclick="LoadAsync">
+                <span class="material-icons" style="font-size:.9rem">refresh</span> Uppdatera
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Token { get; set; } = "";
+
+    private PublicTaskListDto? _list;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try
+        {
+            var http = HttpFactory.CreateClient("PublicClient");
+            var resp = await http.GetAsync($"api/lists/public/{Token}");
+            _list = resp.IsSuccessStatusCode
+                ? await resp.Content.ReadFromJsonAsync<PublicTaskListDto>()
+                : null;
+        }
+        catch { _list = null; }
+        finally { _loading = false; }
+    }
+
+    private static string TypeLabel(TaskListType t) => t switch
+    {
+        TaskListType.ToDo     => "Att göra",
+        TaskListType.Shopping => "Inköpslista",
+        TaskListType.Generic  => "Generisk",
+        _                     => t.ToString()
+    };
+}

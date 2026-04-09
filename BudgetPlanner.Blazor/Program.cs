@@ -1,9 +1,10 @@
 using System.Globalization;
-using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using BudgetPlanner.Blazor.Services;
 using BudgetPlanner.Blazor.State;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+using static BudgetPlanner.Blazor.Services.ToastService;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
 builder.RootComponents.Add<BudgetPlanner.Blazor.App>("#app");
@@ -21,11 +22,11 @@ builder.Services.AddScoped<AuthenticationStateProvider>(sp =>
 // FIX: Single registration — removed duplicate AddTransient<AuthorizationMessageHandler>().
 builder.Services.AddTransient<AuthorizationMessageHandler>();
 
-builder.Services.AddHttpClient("BudgetAPI", client =>
+builder.Services.AddHttpClient("PublicClient", client =>
 {
-    client.BaseAddress = new Uri(apiBase);
-})
-.AddHttpMessageHandler<AuthorizationMessageHandler>();
+    client.BaseAddress = new Uri(
+        builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7000/");
+});
 
 builder.Services.AddScoped(sp =>
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("BudgetAPI"));
@@ -47,5 +48,6 @@ builder.Services.AddSingleton<ToastService>();
 builder.Services.AddScoped<BudgetState>();
 builder.Services.AddScoped<JournalFilterState>();
 builder.Services.AddScoped<SignalRService>();
+builder.Services.AddScoped<TaskListApiService>();
 
 await builder.Build().RunAsync();

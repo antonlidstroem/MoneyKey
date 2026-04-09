@@ -16,6 +16,10 @@ var builder = WebApplication.CreateBuilder(args);
 var cfg  = builder.Configuration;
 var svcs = builder.Services;
 
+svcs.AddScoped<TaskListService>();
+svcs.AddScoped<ITaskListRepository, TaskListRepository>();
+svcs.AddScoped<ITaskItemRepository, TaskItemRepository>();
+
 // ── Fail-fast: validate critical secrets before any service is registered ────
 var jwtSecret = cfg["Jwt:Secret"];
 if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)

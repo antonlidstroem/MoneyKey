@@ -1,0 +1,186 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   lists.css — save as wwwroot/css/lists.css
+   Add to wwwroot/index.html inside <head>:
+       <link href="css/lists.css" rel="stylesheet" />
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── LIST CARD GRID ─────────────────────────────────────────────────────────── */
+.lists-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+    padding: 16px;
+}
+@media (max-width: 767px) {
+    .lists-grid {
+        grid-template-columns: 1fr;
+        padding: 12px;
+        gap: 10px;
+        padding-bottom: 88px; /* clear FAB + bottom nav */
+    }
+}
+
+.list-card {
+    background: var(--color-surface);
+    border-radius: 16px;
+    padding: 16px;
+    border-left: 5px solid var(--list-color, #1565C0);
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    cursor: pointer;
+    transition: transform .12s, box-shadow .12s;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    overflow: hidden;
+}
+.list-card:active { transform: scale(.98); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.list-card-emoji  { font-size: 1.8rem; margin-bottom: 8px; display: block; line-height: 1; }
+.list-card-title  {
+    font-weight: 600; font-size: .95rem; color: var(--color-dark);
+    margin-bottom: 4px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+}
+.list-card-meta   { font-size: .78rem; color: var(--color-muted); margin-bottom: 10px; }
+.list-card-progress-bar {
+    height: 4px; background: var(--color-border);
+    border-radius: 2px; overflow: hidden; margin-bottom: 4px;
+}
+.list-card-progress-fill {
+    height: 100%; border-radius: 2px;
+    background: var(--list-color, #1565C0);
+    transition: width .4s ease;
+}
+.list-card-complete-badge {
+    position: absolute; top: 12px; right: 12px;
+    font-size: .7rem; background: #E8F5E9; color: #2E7D32;
+    border-radius: 99px; padding: 2px 8px; font-weight: 600;
+}
+
+/* ── LIST DETAIL HEADER ──────────────────────────────────────────────────────── */
+.list-detail-progress {
+    font-size: .78rem; color: var(--color-muted); flex-shrink: 0;
+}
+
+/* ── INLINE ADD BAR ──────────────────────────────────────────────────────────── */
+.list-add-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px;
+    border-bottom: .5px solid var(--color-border);
+    flex-shrink: 0;
+    background: var(--color-surface);
+}
+.list-add-bar input {
+    flex: 1; border: none; outline: none;
+    background: transparent; font-size: .9rem; color: var(--color-dark);
+}
+.list-add-bar input::placeholder { color: var(--color-muted); }
+.list-add-btn {
+    width: 30px; height: 30px; border-radius: 50%; border: none;
+    background: var(--list-color, #1565C0); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; flex-shrink: 0;
+    transition: opacity .12s;
+    -webkit-tap-highlight-color: transparent;
+}
+.list-add-btn:disabled { opacity: .35; cursor: default; }
+.list-add-btn .material-icons { font-size: 1rem; }
+
+/* ── TASK ITEM ROW ───────────────────────────────────────────────────────────── */
+.task-item-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 13px 16px;
+    border-bottom: .5px solid var(--color-border);
+    cursor: pointer;
+    transition: background .1s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+.task-item-row:active  { background: var(--color-bg); }
+.task-item-row.is-checked { opacity: .55; }
+.task-item-row.pressing   { background: rgba(0,0,0,.04); }
+.task-item-row.optimistic-pending .task-item-text { opacity: .45; }
+.task-item-row.optimistic-error   { background: var(--color-expense-bg); }
+
+.task-check {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid var(--list-color, #1565C0);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background .12s, border-color .12s;
+}
+.task-check.checked {
+    background: var(--list-color, #1565C0);
+    border-color: var(--list-color, #1565C0);
+}
+.task-check.checked .material-icons { font-size: .8rem; color: #fff; }
+
+.task-item-text {
+    flex: 1; font-size: .9rem; color: var(--color-dark); line-height: 1.35;
+}
+.task-item-text.checked { text-decoration: line-through; color: var(--color-muted); }
+
+.task-item-link-icon        { font-size: .8rem; color: var(--color-muted); }
+.task-item-link-icon.broken { color: var(--color-expense); }
+
+/* ── SHOPPING LIST — bought section ─────────────────────────────────────────── */
+.bought-section-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 16px 6px;
+    font-size: .78rem; font-weight: 600;
+    color: var(--color-muted);
+    text-transform: uppercase; letter-spacing: .05em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.bought-section-header .material-icons { font-size: .9rem; }
+
+/* ── EMOJI + COLOUR PICKERS ──────────────────────────────────────────────────── */
+.new-list-emoji-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.emoji-btn {
+    width: 40px; height: 40px; border-radius: 10px;
+    border: 2px solid transparent; background: var(--color-bg);
+    font-size: 1.25rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color .1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.emoji-btn.selected { border-color: var(--color-primary); }
+
+.new-list-color-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.color-swatch {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid transparent; cursor: pointer;
+    transition: border-color .1s, transform .1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.color-swatch.selected { border-color: var(--color-dark); transform: scale(1.18); }
+
+/* ── SHARE SHEET ─────────────────────────────────────────────────────────────── */
+.share-qr-container {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 14px; padding: 16px;
+}
+.share-link-box {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--color-bg); border-radius: 8px;
+    padding: 10px 12px; width: 100%;
+}
+.share-link-box span {
+    flex: 1; font-size: .78rem; color: var(--color-muted);
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; font-family: monospace;
+}
+
+/* ── PUBLIC SHARE PAGE ───────────────────────────────────────────────────────── */
+.public-list-shell {
+    max-width: 480px; margin: 0 auto;
+    padding: 24px 16px 48px;
+}
+.public-list-header { text-align: center; margin-bottom: 24px; }
+.public-list-emoji  { font-size: 3rem; display: block; margin-bottom: 8px; }
+.public-list-title  { font-size: 1.4rem; font-weight: 700; color: var(--color-dark); }
+.public-list-meta   { font-size: .85rem; color: var(--color-muted); margin-top: 4px; }
+
+/* ── JOURNAL INTEGRATION — dot and badge colours ─────────────────────────────── */
+/* Warm coral — distinct from all existing dot colours */
+.dot-list    { background: #FF7043 !important; }
+.badge-list  { background: #FBE9E7; color: #BF360C; }

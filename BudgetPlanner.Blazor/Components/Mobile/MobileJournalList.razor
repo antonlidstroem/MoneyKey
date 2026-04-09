@@ -67,13 +67,15 @@
         </div>
     }
 
+    <!-- Type chips — includes TaskList -->
     <div class="mobile-chips">
         <button class="mobile-chip @(!Filter.Query.IncludeTypes.Any() ? "active" : "")"
                 @onclick="() => Filter.ShowAllTypes()">Alla</button>
         @foreach (var t in Enum.GetValues<JournalEntryType>())
         {
             var type  = t;
-            var isSolo = Filter.Query.IncludeTypes.Count == 1 && Filter.Query.IncludeTypes.Contains(type);
+            var isSolo = Filter.Query.IncludeTypes.Count == 1
+                         && Filter.Query.IncludeTypes.Contains(type);
             <button class="mobile-chip @(isSolo ? "active" : "")"
                     @onclick="() => Filter.SetOnlyType(type)">@ShortLabel(type)</button>
         }
@@ -84,11 +86,15 @@
         {
             @for (var i = 0; i < 7; i++)
             {
-                <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:.5px solid var(--color-border)">
-                    <div class="skeleton" style="width:32px;height:32px;border-radius:9px;flex-shrink:0"></div>
+                <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;
+                            border-bottom:.5px solid var(--color-border)">
+                    <div class="skeleton"
+                         style="width:32px;height:32px;border-radius:9px;flex-shrink:0"></div>
                     <div style="flex:1">
-                        <div class="skeleton" style="height:13px;width:55%;margin-bottom:6px;border-radius:4px"></div>
-                        <div class="skeleton" style="height:11px;width:40%;border-radius:4px"></div>
+                        <div class="skeleton"
+                             style="height:13px;width:55%;margin-bottom:6px;border-radius:4px"></div>
+                        <div class="skeleton"
+                             style="height:11px;width:40%;border-radius:4px"></div>
                     </div>
                     <div class="skeleton" style="width:60px;height:13px;border-radius:4px"></div>
                 </div>
@@ -97,7 +103,8 @@
         else if (!_entries.Any())
         {
             <div style="text-align:center;padding:48px 24px;color:var(--color-muted)">
-                <span class="material-icons" style="font-size:2.5rem;display:block;margin-bottom:8px">inbox</span>
+                <span class="material-icons"
+                      style="font-size:2.5rem;display:block;margin-bottom:8px">inbox</span>
                 Inga poster hittades
             </div>
         }
@@ -139,8 +146,12 @@
             @if (Filter.Query.Page < _totalPages)
             {
                 <div style="text-align:center;padding:16px">
-                    <button class="btn btn-secondary btn-sm" @onclick="LoadMore" disabled="@_loadingMore">
-                        @if (_loadingMore) { <span class="spinner" style="width:14px;height:14px;border-width:2px"></span> }
+                    <button class="btn btn-secondary btn-sm"
+                            @onclick="LoadMore" disabled="@_loadingMore">
+                        @if (_loadingMore)
+                        {
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        }
                         Ladda fler (@(_totalCount - _entries.Count) kvar)
                     </button>
                 </div>
@@ -156,15 +167,18 @@
     }
 </div>
 
+<!-- ════════════════════════════════════════════════════════════════════════
+     DETAIL SHEET
+     ════════════════════════════════════════════════════════════════════════ -->
 @if (_detail != null)
 {
     <div class="sheet-overlay" @onclick="CloseDetail">
         <div class="sheet-container" @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
-
             <div class="sheet-head">
                 <div style="display:flex;align-items:center;gap:8px">
-                    <span class="mobile-type-dot @DotCss(_detail.EntryType)" style="width:24px;height:24px;font-size:.7rem">
+                    <span class="mobile-type-dot @DotCss(_detail.EntryType)"
+                          style="width:24px;height:24px;font-size:.7rem">
                         @_detail.TypeCode
                     </span>
                     <span style="font-size:15px;font-weight:500">@_detail.Description</span>
@@ -174,7 +188,10 @@
                 </button>
             </div>
 
-            <div class="sheet-amount @AmountCss(_detail)">@FormatAmount(_detail)</div>
+            @if (_detail.EntryType != JournalEntryType.TaskList)
+            {
+                <div class="sheet-amount @AmountCss(_detail)">@FormatAmount(_detail)</div>
+            }
 
             <div class="sheet-fields">
                 <div class="sheet-field">
@@ -217,7 +234,8 @@
                 {
                     <div class="sheet-field">
                         <span class="sheet-field-label">Referens</span>
-                        <span class="sheet-field-val" style="font-family:monospace;font-weight:700;color:var(--color-primary)">
+                        <span class="sheet-field-val"
+                              style="font-family:monospace;font-weight:700;color:var(--color-primary)">
                             @_detail.ReferenceCode
                         </span>
                     </div>
@@ -227,21 +245,29 @@
             @if (_detail.KonteringRows.Any())
             {
                 <div style="padding:0 16px 8px">
-                    <div style="font-size:.7rem;font-weight:600;color:var(--color-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
+                    <div style="font-size:.7rem;font-weight:600;color:var(--color-muted);
+                                text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">
                         Kontering
                     </div>
                     @foreach (var k in _detail.KonteringRows)
                     {
-                        <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:.5px solid var(--color-border);font-size:.82rem;gap:10px">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;
+                                    padding:6px 0;border-bottom:.5px solid var(--color-border);
+                                    font-size:.82rem;gap:10px">
                             <div>
                                 <span style="font-weight:500;font-family:monospace">@k.KontoNr</span>
-                                @if (k.CostCenter != null) { <span style="color:var(--color-muted)"> · @k.CostCenter</span> }
+                                @if (k.CostCenter != null)
+                                {
+                                    <span style="color:var(--color-muted)"> · @k.CostCenter</span>
+                                }
                                 @if (k.Description != null)
                                 {
                                     <div style="color:var(--color-muted);font-size:.75rem">@k.Description</div>
                                 }
                             </div>
-                            <span style="font-weight:500;white-space:nowrap">@k.Amount.ToString("N2") kr</span>
+                            <span style="font-weight:500;white-space:nowrap">
+                                @k.Amount.ToString("N2") kr
+                            </span>
                         </div>
                     }
                 </div>
@@ -252,39 +278,59 @@
                 <div class="mobile-inline-confirm">
                     <p>Ta bort denna transaktion? Åtgärden kan inte ångras.</p>
                     <div style="display:flex;gap:8px">
-                        <button class="btn btn-danger btn-sm" @onclick="ConfirmDeleteAsync" disabled="@_deleting">
-                            @if (_deleting) { <span class="spinner" style="width:12px;height:12px;border-width:2px"></span> }
+                        <button class="btn btn-danger btn-sm"
+                                @onclick="ConfirmDeleteAsync" disabled="@_deleting">
+                            @if (_deleting)
+                            {
+                                <span class="spinner"
+                                      style="width:12px;height:12px;border-width:2px"></span>
+                            }
                             Ta bort
                         </button>
-                        <button class="btn btn-secondary btn-sm" @onclick='() => _confirmingDelete = false'>
-                            Avbryt
-                        </button>
+                        <button class="btn btn-secondary btn-sm"
+                                @onclick='() => _confirmingDelete = false'>Avbryt</button>
                     </div>
                 </div>
             }
 
             <div class="sheet-actions">
+                <!-- Receipt batch: navigate to detail -->
                 @if (_detail.EntryType == JournalEntryType.ReceiptBatch)
                 {
                     var receiptId = _detail.SourceId;
                     <button class="btn btn-primary"
                             @onclick='() => { CloseDetail(); Nav.NavigateTo($"/receipts/{receiptId}"); }'>
-                        <span class="material-icons" style="font-size:.9rem">open_in_new</span> Öppna underlag
+                        <span class="material-icons" style="font-size:.9rem">open_in_new</span>
+                        Öppna underlag
                     </button>
                 }
 
+                <!-- TaskList: navigate to list detail -->
+                @if (_detail.EntryType == JournalEntryType.TaskList)
+                {
+                    var listId = _detail.SourceId;
+                    <button class="btn btn-primary"
+                            @onclick='() => { CloseDetail(); Nav.NavigateTo($"/lists/{listId}"); }'>
+                        <span class="material-icons" style="font-size:.9rem">checklist</span>
+                        Öppna lista
+                    </button>
+                }
+
+                <!-- Transaction: edit + delete -->
                 @if (BudgetState.CanEdit && _detail.EntryType == JournalEntryType.Transaction)
                 {
                     @if (_editingId == _detail.SourceId)
                     {
                         <button class="btn btn-secondary" disabled>
-                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                            <span class="spinner"
+                                  style="width:14px;height:14px;border-width:2px"></span>
                         </button>
                     }
                     else
                     {
                         <button class="btn btn-secondary" @onclick="StartEditAsync">
-                            <span class="material-icons" style="font-size:.9rem">edit</span> Redigera
+                            <span class="material-icons" style="font-size:.9rem">edit</span>
+                            Redigera
                         </button>
                     }
 
@@ -292,7 +338,8 @@
                     {
                         <button class="btn btn-secondary" style="color:var(--color-expense)"
                                 @onclick='() => _confirmingDelete = true'>
-                            <span class="material-icons" style="font-size:.9rem">delete</span> Ta bort
+                            <span class="material-icons" style="font-size:.9rem">delete</span>
+                            Ta bort
                         </button>
                     }
                 }
@@ -301,10 +348,12 @@
     </div>
 }
 
+<!-- Edit transaction sheet -->
 @if (_editOpen && _editTx != null)
 {
     <div class="sheet-overlay" @onclick='() => _editOpen = false'>
-        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto"
+             @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
             <div style="padding:0 4px 24px">
                 <TransactionForm EditTransaction="_editTx"
@@ -316,10 +365,12 @@
     </div>
 }
 
+<!-- Add transaction sheet -->
 @if (_addOpen)
 {
     <div class="sheet-overlay" @onclick='() => _addOpen = false'>
-        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto"
+             @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
             <div style="padding:0 4px 24px">
                 <TransactionForm EditTransaction="null"
@@ -331,12 +382,14 @@
     </div>
 }
 
+<!-- Filter panel sheet -->
 @if (_filterOpen)
 {
     <div class="sheet-overlay" @onclick='() => _filterOpen = false'>
         <div class="sheet-container" style="max-height:85%" @onclick:stopPropagation>
             <div class="sheet-handle-bar"></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:.5px solid var(--color-border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding:12px 16px;border-bottom:.5px solid var(--color-border)">
                 <span style="font-weight:500;font-size:.9rem">Filter</span>
                 <button class="mobile-icon-btn" @onclick='() => _filterOpen = false'>
                     <span class="material-icons" style="font-size:1rem">close</span>
@@ -389,10 +442,7 @@
                 _loading = false;
             }
         }
-        else
-        {
-            _loading = false;
-        }
+        else { _loading = false; }
     }
 
     public void Dispose()
@@ -411,11 +461,7 @@
 
     private void OnStateChanged() => InvokeAsync(async () =>
     {
-        try
-        {
-            await LoadProjectsAsync();
-            await LoadAsync(reset: true);
-        }
+        try { await LoadProjectsAsync(); await LoadAsync(reset: true); }
         catch (Exception ex) { Toast.Error($"Laddningsfel: {ex.Message}"); }
         StateHasChanged();
     });
@@ -432,11 +478,11 @@
         if (BudgetState.ActiveBudgetId <= 0) return;
         if (reset) { Filter.Query.Page = 1; _entries.Clear(); }
         _loading = true;
-
         var r = await JournalSvc.GetPagedAsync(BudgetState.ActiveBudgetId, Filter.Query);
         if (r.HasValue)
         {
-            _entries    = reset ? r.Value.Result.Items : _entries.Concat(r.Value.Result.Items).ToList();
+            _entries    = reset ? r.Value.Result.Items
+                                : _entries.Concat(r.Value.Result.Items).ToList();
             _totalCount = r.Value.Result.TotalCount;
             _totalPages = r.Value.Result.TotalPages;
             _summary    = r.Value.Summary;
@@ -472,30 +518,22 @@
 
     private void OpenDetail(JournalEntryDto entry)
     {
-        _detail           = entry;
-        _confirmingDelete = false;
+        _detail = entry; _confirmingDelete = false;
     }
 
-    private void CloseDetail()
-    {
-        _detail           = null;
-        _confirmingDelete = false;
-    }
+    private void CloseDetail() { _detail = null; _confirmingDelete = false; }
 
     private async Task StartEditAsync()
     {
         if (_detail == null) return;
         var sourceId = _detail.SourceId;
-        _editingId   = sourceId;
-        StateHasChanged();
+        _editingId   = sourceId; StateHasChanged();
         try
         {
             var full = await Http.GetFromJsonAsync<TransactionDto>(
                 $"api/budgets/{BudgetState.ActiveBudgetId}/transactions/{sourceId}");
             if (full == null) { Toast.Error("Kunde inte hämta transaktionen."); return; }
-            _editTx   = full;
-            _detail   = null;
-            _editOpen = true;
+            _editTx = full; _detail = null; _editOpen = true;
         }
         catch (Exception ex) { Toast.Error($"Fel: {ex.Message}"); }
         finally { _editingId = -1; StateHasChanged(); }
@@ -503,9 +541,7 @@
 
     private async Task OnTransactionSaved(TransactionDto _)
     {
-        _addOpen  = false;
-        _editOpen = false;
-        _editTx   = null;
+        _addOpen = false; _editOpen = false; _editTx = null;
         await LoadAsync(reset: true);
     }
 
@@ -533,8 +569,7 @@
 
     private void CloseSearch()
     {
-        _searchOpen  = false;
-        _searchText  = "";
+        _searchOpen = false; _searchText = "";
         Filter.Update(q => { q.FilterByDescription = false; q.Description = null; });
     }
 
@@ -548,12 +583,15 @@
         });
     }
 
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
     private static string ShortLabel(JournalEntryType t) => t switch
     {
         JournalEntryType.Transaction   => "Transakt.",
         JournalEntryType.Milersattning => "Milersättn.",
         JournalEntryType.Vab           => "VAB",
         JournalEntryType.ReceiptBatch  => "Kvitton",
+        JournalEntryType.TaskList      => "Listor",
         _                              => t.ToString()
     };
 
@@ -563,16 +601,21 @@
         JournalEntryType.Milersattning => "dot-mi",
         JournalEntryType.Vab           => "dot-vab",
         JournalEntryType.ReceiptBatch  => "dot-kvitto",
+        JournalEntryType.TaskList      => "dot-list",   // coral — defined in lists.css
         _                              => "dot-tx"
     };
 
     private static string AmountCss(JournalEntryDto e) =>
-        e.EntryType == JournalEntryType.ReceiptBatch ? "" : e.Amount >= 0 ? "amount-pos" : "amount-neg";
+        e.EntryType is JournalEntryType.ReceiptBatch or JournalEntryType.TaskList
+            ? ""
+            : e.Amount >= 0 ? "amount-pos" : "amount-neg";
 
     private static string FormatAmount(JournalEntryDto e) =>
-        e.EntryType == JournalEntryType.ReceiptBatch
-            ? $"{e.Amount:N0} kr"
-            : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
+        e.EntryType == JournalEntryType.TaskList
+            ? ""
+            : e.EntryType == JournalEntryType.ReceiptBatch
+                ? $"{e.Amount:N0} kr"
+                : (e.Amount >= 0 ? "+" : "") + $"{e.Amount:N0} kr";
 
     private static string StatusDot(string s) => s switch
     {

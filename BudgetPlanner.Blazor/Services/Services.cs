@@ -539,6 +539,111 @@ public class ToastService
         Toasts.RemoveAll(t => t.Id == id);
         OnChange?.Invoke();
     }
+
+    public class TaskListApiService : ApiServiceBase
+    {
+        public TaskListApiService(HttpClient http) : base(http) { }
+
+        // ── Lists ─────────────────────────────────────────────────────────────────
+
+        public async Task<List<TaskListDto>?> GetAllAsync(int budgetId, bool includeArchived = false)
+        {
+            var resp = await Http.GetAsync(
+                $"api/budgets/{budgetId}/lists?includeArchived={includeArchived}");
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<List<TaskListDto>>();
+        }
+
+        public async Task<TaskListDto?> GetByIdAsync(int budgetId, int listId)
+        {
+            var resp = await Http.GetAsync($"api/budgets/{budgetId}/lists/{listId}");
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+        }
+
+        public async Task<TaskListDto?> CreateAsync(int budgetId, CreateTaskListDto dto)
+        {
+            var resp = await Http.PostAsJsonAsync($"api/budgets/{budgetId}/lists", dto);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+        }
+
+        public async Task<TaskListDto?> UpdateAsync(int budgetId, int listId, UpdateTaskListDto dto)
+        {
+            var resp = await Http.PutAsJsonAsync($"api/budgets/{budgetId}/lists/{listId}", dto);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+        }
+
+        public async Task<bool> ArchiveAsync(int budgetId, int listId)
+        {
+            var resp = await Http.PatchAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/archive",
+                JsonContent.Create(new { }));
+            return resp.IsSuccessStatusCode;
+        }
+
+        public async Task<bool> DeleteAsync(int budgetId, int listId)
+        {
+            var resp = await Http.DeleteAsync($"api/budgets/{budgetId}/lists/{listId}");
+            return resp.IsSuccessStatusCode;
+        }
+
+        // ── Items ─────────────────────────────────────────────────────────────────
+
+        public async Task<TaskItemDto?> AddItemAsync(int budgetId, int listId, CreateTaskItemDto dto)
+        {
+            var resp = await Http.PostAsJsonAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items", dto);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+        }
+
+        public async Task<TaskItemDto?> CheckItemAsync(
+            int budgetId, int listId, int itemId, bool isChecked)
+        {
+            var resp = await Http.PatchAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/check",
+                JsonContent.Create(new CheckTaskItemDto(isChecked)));
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+        }
+
+        public async Task<TaskItemDto?> UpdateItemTextAsync(
+            int budgetId, int listId, int itemId, string text)
+        {
+            var resp = await Http.PutAsJsonAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}",
+                new UpdateTaskItemDto(text));
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+        }
+
+        public async Task<bool> DeleteItemAsync(int budgetId, int listId, int itemId)
+        {
+            var resp = await Http.DeleteAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}");
+            return resp.IsSuccessStatusCode;
+        }
+
+        public async Task<bool> ReorderItemsAsync(int budgetId, int listId, List<int> orderedIds)
+        {
+            var resp = await Http.PutAsJsonAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items/reorder",
+                new ReorderTaskItemDto(orderedIds));
+            return resp.IsSuccessStatusCode;
+        }
+
+        public async Task<TaskItemDto?> LinkItemAsync(
+            int budgetId, int listId, int itemId, LinkTaskItemDto dto)
+        {
+            var resp = await Http.PostAsJsonAsync(
+                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/link", dto);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+        }
+    }
+
 }
 
 public class ToastMessage
@@ -548,3 +653,5 @@ public class ToastMessage
     public string Type    { get; set; } = "info";
     public string Icon    { get; set; } = "info";
 }
+
+

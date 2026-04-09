@@ -1,0 +1,918 @@
+@page "/lists/{ListId:int}"
+@attribute [Authorize]
+@implements IDisposable
+@inject TaskListApiService ListSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+@inject ProjectService ProjectSvc
+@inject MilersattningApiService MiSvc
+@inject VabApiService VabSvc
+@inject SignalRService SignalR
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@using BudgetPlanner.Blazor.Components.Forms
+@using BudgetPlanner.Blazor.Components.Shared
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DESKTOP
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="desktop-page-wrapper">
+    <div class="page-header">
+        <div style="display:flex;align-items:center;gap:10px">
+            <button class="btn btn-ghost btn-sm" @onclick='() => Nav.NavigateTo("/lists")'>
+                <span class="material-icons" style="font-size:.9rem">arrow_back</span>
+            </button>
+            @if (_list != null)
+            {
+                <span style="font-size:1.4rem">@_list.Emoji</span>
+                <span class="page-title">@_list.Title</span>
+                <span style="font-size:.8rem;color:var(--color-muted)">@_list.ProgressLabel</span>
+            }
+        </div>
+        <div class="header-actions">
+            @if (_list != null)
+            {
+                <button class="btn btn-secondary btn-sm" @onclick='() => _shareOpen = true'>
+                    <span class="material-icons" style="font-size:.9rem">share</span> Dela
+                </button>
+                @if (BudgetState.CanEdit)
+                {
+                    <!-- BUG 1 FIX: call OpenEditList() to populate form fields first -->
+                    <button class="btn btn-secondary btn-sm" @onclick="OpenEditList">
+                        <span class="material-icons" style="font-size:.9rem">edit</span> Redigera
+                    </button>
+                }
+            }
+        </div>
+    </div>
+
+    <!-- BUG 2 FIX: real desktop add bar outside the shared RenderFragment -->
+    @if (BudgetState.CanEdit && _list != null)
+    {
+        <div class="list-add-bar" style="--list-color:@_list.ColorHex">
+            <input placeholder="+ Lägg till uppgift..."
+                   @bind="_newText" @bind:event="oninput"
+                   @onkeydown="OnAddKeydown" />
+            <button class="list-add-btn" @onclick="AddItemAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_newText) || _adding)">
+                <span class="material-icons">add</span>
+            </button>
+        </div>
+    }
+
+    <div class="page-content" style="overflow-y:auto;padding:0">
+        @ListContent()
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MOBILE
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="mobile-page-shell">
+    <div class="mobile-topbar">
+        <div style="display:flex;align-items:center;gap:8px;flex:1;overflow:hidden">
+            <button class="mobile-icon-btn" @onclick='() => Nav.NavigateTo("/lists")'>
+                <span class="material-icons" style="font-size:1.1rem">arrow_back</span>
+            </button>
+            @if (_list != null)
+            {
+                <span style="font-size:1.2rem;flex-shrink:0">@_list.Emoji</span>
+                <span class="mobile-title" style="overflow:hidden;text-overflow:ellipsis">@_list.Title</span>
+            }
+        </div>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+            @if (_list != null)
+            {
+                <button class="mobile-icon-btn" @onclick='() => _shareOpen = true'>
+                    <span class="material-icons" style="font-size:1rem">share</span>
+                </button>
+                @if (BudgetState.CanEdit)
+                {
+                    <!-- BUG 1 FIX: call OpenEditList() -->
+                    <button class="mobile-icon-btn" @onclick="OpenEditList">
+                        <span class="material-icons" style="font-size:1rem">edit</span>
+                    </button>
+                }
+            }
+        </div>
+    </div>
+
+    @if (_list != null && _list.TotalItems > 0)
+    {
+        <div style="height:3px;background:var(--color-border);flex-shrink:0">
+            <div style="height:100%;width:@_list.ProgressPercent%;background:@_list.ColorHex;transition:width .4s ease"></div>
+        </div>
+    }
+
+    @if (BudgetState.CanEdit && _list != null)
+    {
+        <div class="list-add-bar" style="--list-color:@_list.ColorHex">
+            <input @ref="_addRef"
+                   placeholder="+ Lägg till uppgift..."
+                   @bind="_newText" @bind:event="oninput"
+                   @onkeydown="OnAddKeydown" />
+            <button class="list-add-btn" @onclick="AddItemAsync"
+                    disabled="@(string.IsNullOrWhiteSpace(_newText) || _adding)">
+                <span class="material-icons">add</span>
+            </button>
+        </div>
+    }
+
+    <div class="mobile-page-scroll" style="padding:0">
+        @ListContent()
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     ACTION SHEET — long press
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_actionItem != null)
+{
+    <div class="sheet-overlay" @onclick="CloseAction">
+        <div class="sheet-container" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px 4px;font-weight:500;font-size:.9rem;color:var(--color-muted);
+                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                @_actionItem.Text
+            </div>
+
+            <button class="more-nav-item" @onclick="ActionToggleCheck">
+                <span class="material-icons">@(_actionItem.IsChecked ? "radio_button_unchecked" : "check_circle")</span>
+                @(_actionItem.IsChecked ? "Markera som väntande" : "Markera som klar")
+            </button>
+            <button class="more-nav-item" @onclick="StartInlineEdit">
+                <span class="material-icons">edit</span> Redigera text
+            </button>
+
+            <div style="height:.5px;background:var(--color-border);margin:4px 0"></div>
+            <div style="padding:8px 16px 4px;font-size:.7rem;font-weight:600;color:var(--color-muted);
+                        text-transform:uppercase;letter-spacing:.05em">
+                Omvandla till budgetpost
+            </div>
+            <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "transaction"; }'>
+                <span class="material-icons">swap_horiz</span> Transaktion
+            </button>
+            <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "mi"; }'>
+                <span class="material-icons">directions_car</span> Milersättning
+            </button>
+            <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "vab"; }'>
+                <span class="material-icons">child_care</span> VAB
+            </button>
+
+            <div style="height:.5px;background:var(--color-border);margin:4px 0"></div>
+            @if (_confirmDeleteItem)
+            {
+                <div class="mobile-inline-confirm" style="margin:8px 16px">
+                    <p>Ta bort uppgiften? Åtgärden kan inte ångras.</p>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-danger btn-sm" @onclick="ActionDeleteItemAsync">Ta bort</button>
+                        <button class="btn btn-secondary btn-sm"
+                                @onclick='() => _confirmDeleteItem = false'>Avbryt</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button class="more-nav-item" style="color:var(--color-expense)"
+                        @onclick='() => _confirmDeleteItem = true'>
+                    <span class="material-icons" style="color:var(--color-expense)">delete</span> Ta bort
+                </button>
+            }
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     CONVERT → TRANSACTION
+     BUG 3 FIX: pass null for EditTransaction (new mode); use the pre-fill
+     description approach via the _prefillTxDescription field that is
+     read by OnTransactionFormInit in TransactionForm.
+     If TransactionForm doesn't support pre-fill, pass a minimal
+     TransactionDto with only Description — the form should handle nulls
+     for all other fields since they're optional.
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_convertMode == "transaction" && _actionItem != null && _projects != null)
+{
+    var prefillTx = new TransactionDto { Id = 0, Description = _actionItem.Text };
+    <div class="sheet-overlay" @onclick='() => _convertMode = null'>
+        <div class="sheet-container" style="max-height:95%;overflow-y:auto" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:10px 16px 0;font-size:.78rem;color:var(--color-muted)">
+                Omvandlar uppgift till transaktion
+            </div>
+            <div style="padding:0 4px 24px">
+                <TransactionForm EditTransaction="prefillTx"
+                                 Projects="_projects"
+                                 OnSaved="OnTransactionConverted"
+                                 OnCancelled='() => _convertMode = null' />
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     CONVERT → MILERSÄTTNING
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_convertMode == "mi" && _actionItem != null)
+{
+    <div class="sheet-overlay" @onclick='() => _convertMode = null'>
+        <div class="sheet-container" @onclick:stopPropagation style="max-height:85%;overflow-y:auto">
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px;font-weight:600">Milersättning från uppgift</div>
+            <div style="padding:0 16px 24px">
+                <div class="form-group">
+                    <label class="form-label">Datum</label>
+                    <input class="form-control" type="date"
+                           value="@_cvDate.ToString("yyyy-MM-dd")"
+                           @onchange='e => { if (DateTime.TryParse(e.Value?.ToString(), out var d)) _cvDate = d; }' />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Från</label>
+                        <input class="form-control" @bind="_cvFrom"
+                               placeholder="@_actionItem.Text" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Till</label>
+                        <input class="form-control" @bind="_cvTo" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Km</label>
+                        <input class="form-control" type="number" step="0.1" @bind="_cvKm" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Taxa (kr/km)</label>
+                        <input class="form-control" type="number" step="0.01" @bind="_cvRate" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Syfte</label>
+                    <input class="form-control" value="@_actionItem.Text" @bind="_cvPurpose" />
+                </div>
+                <div style="display:flex;gap:10px;margin-top:16px">
+                    <button class="btn btn-secondary" @onclick='() => _convertMode = null'>Avbryt</button>
+                    <button class="btn btn-primary" @onclick="ConvertToMiAsync" disabled="@_converting">
+                        @if (_converting)
+                        {
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        }
+                        Skapa milersättning
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     CONVERT → VAB
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_convertMode == "vab" && _actionItem != null)
+{
+    <div class="sheet-overlay" @onclick='() => _convertMode = null'>
+        <div class="sheet-container" @onclick:stopPropagation style="max-height:85%;overflow-y:auto">
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px;font-weight:600">VAB från uppgift</div>
+            <div style="padding:0 16px 24px">
+                <div class="form-group">
+                    <label class="form-label">Barnets namn</label>
+                    <input class="form-control" @bind="_cvChild"
+                           placeholder="@_actionItem.Text" />
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Från</label>
+                        <input class="form-control" type="date"
+                               value="@_cvVabStart.ToString("yyyy-MM-dd")"
+                               @onchange='e => { if (DateTime.TryParse(e.Value?.ToString(), out var d)) _cvVabStart = d; }' />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Till</label>
+                        <input class="form-control" type="date"
+                               value="@_cvVabEnd.ToString("yyyy-MM-dd")"
+                               @onchange='e => { if (DateTime.TryParse(e.Value?.ToString(), out var d)) _cvVabEnd = d; }' />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Dagersättning (kr)</label>
+                        <input class="form-control" type="number" @bind="_cvBenefit" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Nivå (0–1)</label>
+                        <input class="form-control" type="number" step="0.01"
+                               min="0" max="1" @bind="_cvVabRate" />
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:16px">
+                    <button class="btn btn-secondary" @onclick='() => _convertMode = null'>Avbryt</button>
+                    <button class="btn btn-primary" @onclick="ConvertToVabAsync" disabled="@_converting">
+                        @if (_converting)
+                        {
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        }
+                        Skapa VAB
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     INLINE TEXT EDIT SHEET
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_editingItem != null)
+{
+    <div class="sheet-overlay" @onclick='() => _editingItem = null'>
+        <div class="sheet-container" @onclick:stopPropagation>
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px 24px">
+                <div class="form-group">
+                    <label class="form-label">Uppgiftstext</label>
+                    <input class="form-control" @bind="_editText" />
+                </div>
+                <div style="display:flex;gap:10px">
+                    <button class="btn btn-secondary" @onclick='() => _editingItem = null'>Avbryt</button>
+                    <button class="btn btn-primary" @onclick="SaveEditAsync">Spara</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SHARE SHEET
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_shareOpen && _list != null)
+{
+    <div class="sheet-overlay" @onclick='() => _shareOpen = false'>
+        <div class="sheet-container" @onclick:stopPropagation style="max-height:80%">
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px;font-weight:600">Dela lista</div>
+            <div class="share-qr-container">
+                <canvas id="qr-canvas" width="200" height="200"
+                        style="border-radius:12px;border:4px solid var(--color-bg)"></canvas>
+                <div class="share-link-box">
+                    <span>@ShareUrl</span>
+                    <button class="btn btn-ghost btn-sm" @onclick="CopyShareLink">
+                        <span class="material-icons" style="font-size:.9rem">content_copy</span>
+                    </button>
+                </div>
+                <p style="font-size:.8rem;color:var(--color-muted);text-align:center;padding:0 8px">
+                    Alla med denna länk kan se listan.
+                    Bara budgetmedlemmar kan redigera.
+                </p>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     EDIT LIST META SHEET
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_editListOpen && _list != null)
+{
+    <div class="sheet-overlay" @onclick='() => _editListOpen = false'>
+        <div class="sheet-container" @onclick:stopPropagation
+             style="max-height:85%;overflow-y:auto">
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px;font-weight:600">Redigera lista</div>
+            <div style="padding:0 16px 24px">
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Namn</label>
+                    <input class="form-control" @bind="_editListTitle" />
+                </div>
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Typ</label>
+                    <div style="display:flex;gap:8px">
+                        @foreach (var lt in Enum.GetValues<TaskListType>())
+                        {
+                            var t = lt;
+                            <button class="btn btn-sm @(_editListType == t ? "btn-primary" : "btn-secondary")"
+                                    @onclick="() => _editListType = t">@TypeLabel(t)</button>
+                        }
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Emoji</label>
+                    <div class="new-list-emoji-row">
+                        @foreach (var em in Emojis)
+                        {
+                            var emoji = em;
+                            <button class="emoji-btn @(_editListEmoji == emoji ? "selected" : "")"
+                                    @onclick="() => _editListEmoji = emoji">@emoji</button>
+                        }
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:20px">
+                    <label class="form-label">Färg</label>
+                    <div class="new-list-color-row">
+                        @foreach (var c in Colors)
+                        {
+                            var col = c;
+                            <button class="color-swatch @(_editListColor == col ? "selected" : "")"
+                                    style="background:@col"
+                                    @onclick="() => _editListColor = col">
+                            </button>
+                        }
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;flex-wrap:wrap">
+                    <button class="btn btn-secondary" @onclick='() => _editListOpen = false'>Avbryt</button>
+                    <button class="btn btn-primary" @onclick="SaveListMetaAsync">Spara</button>
+                    <button class="btn btn-secondary"
+                            style="margin-left:auto;color:var(--color-muted)"
+                            @onclick="ArchiveListAsync">
+                        <span class="material-icons" style="font-size:.9rem">inventory_2</span> Arkivera
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int ListId { get; set; }
+
+    private TaskListDto?     _list;
+    private List<ProjectDto> _projects = new();
+    private ElementReference _addRef;
+
+    private string _newText = "";
+    private bool   _adding;
+    private Dictionary<int, bool> _pendingChecks = new();
+
+    private TaskItemDto? _actionItem;
+    private bool         _confirmDeleteItem;
+    private Timer?       _pressTimer;
+    private int          _pressItemId = -1;
+
+    // BUG 4 FIX: exposed as property so it can default based on list type
+    private bool _boughtExpanded;
+
+    private TaskItemDto? _editingItem;
+    private string       _editText = "";
+
+    private string?  _convertMode;
+    private bool     _converting;
+    private DateTime _cvDate      = DateTime.Today;
+    private string   _cvFrom      = "", _cvTo = "", _cvPurpose = "";
+    private decimal  _cvKm, _cvRate = 0.25m;
+    private string?  _cvChild;
+    private DateTime _cvVabStart  = DateTime.Today, _cvVabEnd = DateTime.Today;
+    private decimal  _cvBenefit, _cvVabRate = 0.8m;
+
+    private bool _shareOpen;
+    private bool _editListOpen;
+    private string       _editListTitle = "";
+    private string       _editListEmoji = "📋";
+    private string       _editListColor = "#1565C0";
+    private TaskListType _editListType  = TaskListType.ToDo;
+
+    private static readonly string[] Emojis =
+    {
+        "📋","✅","🛒","📝","🎯","💡","🏠","💼","🎉","📚","🏋️","🌱"
+    };
+    private static readonly string[] Colors =
+    {
+        "#1565C0","#2E7D32","#C62828","#F57F17","#6A1B9A",
+        "#00838F","#37474F","#AD1457","#4E342E","#1B5E20"
+    };
+
+    private string ShareUrl => $"{Nav.BaseUri}lists/public/{_list?.SharedToken}";
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        BudgetState.StateChanged += OnStateChanged;
+        SignalR.OnBudgetEvent    += OnSignalR;
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_shareOpen && _list != null)
+        {
+            try { await JS.InvokeVoidAsync("renderQrCode", "qr-canvas", ShareUrl); }
+            catch { /* QR lib may not be loaded yet */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        BudgetState.StateChanged -= OnStateChanged;
+        SignalR.OnBudgetEvent    -= OnSignalR;
+        _pressTimer?.Dispose();
+    }
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync(); StateHasChanged();
+    });
+
+    // BUG 8 FIX: handle archive/delete events by navigating away
+    private async Task OnSignalR(State.BudgetHubEvent e)
+    {
+        if (e.BudgetId != BudgetState.ActiveBudgetId) return;
+        switch (e.Event)
+        {
+            case "TaskListArchived":
+            case "TaskListDeleted":
+                // If this is our list, navigate back.
+                Nav.NavigateTo("/lists");
+                break;
+            case var ev when ev.StartsWith("TaskItem") || ev == "TaskListUpdated" || ev == "TaskListReordered":
+                await LoadAsync();
+                await InvokeAsync(StateHasChanged);
+                break;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (BudgetState.ActiveBudgetId <= 0) return;
+        _list     = await ListSvc.GetByIdAsync(BudgetState.ActiveBudgetId, ListId);
+        _projects = await ProjectSvc.GetAllAsync(BudgetState.ActiveBudgetId) ?? new();
+
+        if (_list == null) { Nav.NavigateTo("/lists"); return; }
+
+        // BUG 4 FIX: for ToDo/Generic lists, default bought section to open
+        // so completed items are visible without an extra tap.
+        if (_list.ListType != TaskListType.Shopping)
+            _boughtExpanded = true;
+    }
+
+    // ── Add item ───────────────────────────────────────────────────────────────
+
+    private async Task OnAddKeydown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await AddItemAsync();
+    }
+
+    private async Task AddItemAsync()
+    {
+        var text = _newText.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        _adding  = true;
+        _newText = "";
+
+        // Optimistic: add to local list immediately.
+        var optimistic = new TaskItemDto
+        {
+            Id        = -1,
+            ListId    = ListId,
+            Text      = text,
+            IsChecked = false,
+            SortOrder = _list?.Items.Count ?? 0
+        };
+        _list?.Items.Add(optimistic);
+        StateHasChanged();
+
+        try
+        {
+            var result = await ListSvc.AddItemAsync(
+                BudgetState.ActiveBudgetId, ListId, new CreateTaskItemDto(text));
+
+            if (result != null)
+            {
+                var idx = _list?.Items.IndexOf(optimistic) ?? -1;
+                if (idx >= 0 && _list != null) _list.Items[idx] = result;
+                // Refresh counts.
+                if (_list != null)
+                {
+                    _list.TotalItems = _list.Items.Count;
+                    _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
+                }
+            }
+            else
+            {
+                _list?.Items.Remove(optimistic);
+                Toast.Error("Kunde inte lägga till uppgiften.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _list?.Items.Remove(optimistic);
+            Toast.Error(ex.Message);
+        }
+        finally
+        {
+            _adding = false;
+            try { await _addRef.FocusAsync(); } catch { }
+        }
+    }
+
+    // ── Check / uncheck ────────────────────────────────────────────────────────
+
+    private async Task ToggleCheckAsync(TaskItemDto item)
+    {
+        var original   = item.IsChecked;
+        item.IsChecked = !original;
+        item.CheckedAt = item.IsChecked ? DateTime.UtcNow : null;
+        _pendingChecks[item.Id] = item.IsChecked;
+
+        // Update summary counts optimistically.
+        if (_list != null)
+            _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
+
+        StateHasChanged();
+
+        try
+        {
+            var result = await ListSvc.CheckItemAsync(
+                BudgetState.ActiveBudgetId, ListId, item.Id, item.IsChecked);
+
+            if (result == null)
+            {
+                item.IsChecked = original;
+                item.CheckedAt = original ? DateTime.UtcNow : null;
+                if (_list != null) _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
+                Toast.Error("Kunde inte uppdatera uppgiften.");
+            }
+            else
+            {
+                item.CheckedAt       = result.CheckedAt;
+                item.CheckedByUserId = result.CheckedByUserId;
+            }
+        }
+        catch (Exception ex)
+        {
+            item.IsChecked = original;
+            Toast.Error(ex.Message);
+        }
+        finally { _pendingChecks.Remove(item.Id); }
+    }
+
+    // ── Long press ─────────────────────────────────────────────────────────────
+
+    private void OnPointerDown(TaskItemDto item)
+    {
+        _pressItemId = item.Id;
+        _pressTimer?.Dispose();
+        _pressTimer = new Timer(_ =>
+            InvokeAsync(() => { if (_pressItemId == item.Id) OpenAction(item); }),
+            null, 400, Timeout.Infinite);
+    }
+
+    private void OnPointerUp()
+    {
+        _pressTimer?.Dispose();
+        _pressTimer  = null;
+        _pressItemId = -1;
+    }
+
+    private void OpenAction(TaskItemDto item)
+    {
+        _actionItem = item; _confirmDeleteItem = false; StateHasChanged();
+    }
+
+    private void CloseAction() { _actionItem = null; _confirmDeleteItem = false; }
+
+    // ── Action handlers ────────────────────────────────────────────────────────
+
+    private async Task ActionToggleCheck()
+    {
+        if (_actionItem == null) return;
+        var item = _actionItem; CloseAction();
+        await ToggleCheckAsync(item);
+    }
+
+    private void StartInlineEdit()
+    {
+        if (_actionItem == null) return;
+        _editingItem = _actionItem;
+        _editText    = _actionItem.Text;
+        CloseAction();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editingItem == null) return;
+        var result = await ListSvc.UpdateItemTextAsync(
+            BudgetState.ActiveBudgetId, ListId, _editingItem.Id, _editText);
+        if (result != null) { _editingItem.Text = result.Text; Toast.Success("Uppgift uppdaterad."); }
+        else                { Toast.Error("Kunde inte uppdatera uppgiften."); }
+        _editingItem = null;
+    }
+
+    private async Task ActionDeleteItemAsync()
+    {
+        if (_actionItem == null) return;
+        var item = _actionItem; CloseAction();
+        var ok = await ListSvc.DeleteItemAsync(BudgetState.ActiveBudgetId, ListId, item.Id);
+        if (ok)
+        {
+            _list?.Items.Remove(item);
+            if (_list != null)
+            {
+                _list.TotalItems   = _list.Items.Count;
+                _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
+            }
+            Toast.Success("Uppgift borttagen.");
+        }
+        else { Toast.Error("Kunde inte ta bort uppgiften."); }
+    }
+
+    // ── Convert ────────────────────────────────────────────────────────────────
+
+    private async Task OnTransactionConverted(TransactionDto tx)
+    {
+        _convertMode = null;
+        if (_actionItem == null) return;
+        await ListSvc.LinkItemAsync(BudgetState.ActiveBudgetId, ListId, _actionItem.Id,
+            new LinkTaskItemDto(LinkedEntityType.Transaction, tx.Id));
+        Toast.Success("Uppgift länkad till transaktion.");
+        _actionItem = null;
+        await LoadAsync();
+    }
+
+    private async Task ConvertToMiAsync()
+    {
+        if (_actionItem == null || _cvKm <= 0) return;
+        _converting = true;
+        try
+        {
+            var mi = await MiSvc.CreateAsync(BudgetState.ActiveBudgetId,
+                new CreateMilersattningDto(
+                    _cvDate,
+                    string.IsNullOrWhiteSpace(_cvFrom) ? _actionItem.Text : _cvFrom,
+                    _cvTo, _cvKm, _cvRate, _cvPurpose));
+            if (mi != null)
+            {
+                await ListSvc.LinkItemAsync(BudgetState.ActiveBudgetId, ListId,
+                    _actionItem.Id,
+                    new LinkTaskItemDto(LinkedEntityType.Milersattning, mi.Id));
+                Toast.Success("Uppgift länkad till milersättning.");
+                _convertMode = null; _actionItem = null;
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _converting = false; }
+    }
+
+    private async Task ConvertToVabAsync()
+    {
+        if (_actionItem == null) return;
+        _converting = true;
+        try
+        {
+            var childName = string.IsNullOrWhiteSpace(_cvChild) ? _actionItem.Text : _cvChild;
+            var vab = await VabSvc.CreateAsync(BudgetState.ActiveBudgetId,
+                new CreateVabDto(childName, _cvVabStart, _cvVabEnd, _cvBenefit, _cvVabRate));
+            if (vab != null)
+            {
+                await ListSvc.LinkItemAsync(BudgetState.ActiveBudgetId, ListId,
+                    _actionItem.Id,
+                    new LinkTaskItemDto(LinkedEntityType.Vab, vab.Id));
+                Toast.Success("Uppgift länkad till VAB.");
+                _convertMode = null; _actionItem = null;
+                await LoadAsync();
+            }
+        }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _converting = false; }
+    }
+
+    // ── Share ──────────────────────────────────────────────────────────────────
+
+    private async Task CopyShareLink()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", ShareUrl);
+            Toast.Success("Länk kopierad!");
+        }
+        catch { Toast.Error("Kunde inte kopiera länken."); }
+    }
+
+    // BUG 1 FIX: OpenEditList populates all form fields before opening sheet
+    private void OpenEditList()
+    {
+        if (_list == null) return;
+        _editListTitle = _list.Title;
+        _editListEmoji = _list.Emoji;
+        _editListColor = _list.ColorHex;
+        _editListType  = _list.ListType;
+        _editListOpen  = true;
+    }
+
+    private async Task SaveListMetaAsync()
+    {
+        if (_list == null) return;
+        var result = await ListSvc.UpdateAsync(BudgetState.ActiveBudgetId, ListId,
+            new UpdateTaskListDto(_editListTitle, _editListType, _editListEmoji, _editListColor));
+        if (result != null)
+        {
+            _list = result; _editListOpen = false;
+            Toast.Success("Lista uppdaterad.");
+        }
+        else { Toast.Error("Kunde inte uppdatera listan."); }
+    }
+
+    private async Task ArchiveListAsync()
+    {
+        if (_list == null) return;
+        await ListSvc.ArchiveAsync(BudgetState.ActiveBudgetId, ListId);
+        Toast.Success("Lista arkiverad.");
+        Nav.NavigateTo("/lists");
+    }
+
+    // ── Shared content ─────────────────────────────────────────────────────────
+
+    private RenderFragment ListContent() =>
+        @<div style="--list-color:@(_list?.ColorHex ?? "#1565C0")">
+            @if (_list == null)
+            {
+                <div style="text-align:center;padding:60px"><div class="spinner"></div></div>
+            }
+            else
+            {
+                var activeItems  = _list.Items
+                    .Where(i => !i.IsChecked)
+                    .OrderBy(i => i.SortOrder)
+                    .ToList();
+                var checkedItems = _list.Items
+                    .Where(i => i.IsChecked)
+                    .OrderByDescending(i => i.CheckedAt)
+                    .ToList();
+
+                @if (!_list.Items.Any())
+                {
+                    <div style="text-align:center;padding:48px 24px;color:var(--color-muted)">
+                        <span style="font-size:2.5rem;display:block;margin-bottom:10px">@_list.Emoji</span>
+                        <div style="font-size:.9rem">Inga uppgifter ännu.</div>
+                    </div>
+                }
+
+                @foreach (var itm in activeItems)
+                {
+                    var item      = itm;
+                    var isPending = _pendingChecks.ContainsKey(item.Id);
+                    <div class="task-item-row @(isPending ? "optimistic-pending" : "")"
+                         @onclick="() => ToggleCheckAsync(item)"
+                         @onpointerdown="() => OnPointerDown(item)"
+                         @onpointerup="OnPointerUp"
+                         @onpointercancel="OnPointerUp">
+                        <div class="task-check">
+                            @if (item.IsChecked) { <span class="material-icons">check</span> }
+                        </div>
+                        <span class="task-item-text">@item.Text</span>
+                        @if (item.LinkedEntityType != null)
+                        {
+                            <span class="material-icons task-item-link-icon @(item.LinkBroken ? "broken" : "")"
+                                  title="@(item.LinkBroken ? "Länk bruten" : "Länkad till budget")">
+                                @(item.LinkBroken ? "link_off" : "link")
+                            </span>
+                        }
+                    </div>
+                }
+
+                @if (checkedItems.Any())
+                {
+                    <div class="bought-section-header"
+                         @onclick='() => _boughtExpanded = !_boughtExpanded'>
+                        <span class="material-icons">
+                            @(_boughtExpanded ? "expand_less" : "expand_more")
+                        </span>
+                        @(_list.ListType == TaskListType.Shopping ? "Köpt" : "Klara")
+                        (@checkedItems.Count)
+                    </div>
+                    @if (_boughtExpanded)
+                    {
+                        @foreach (var itm in checkedItems)
+                        {
+                            var item = itm;
+                            <div class="task-item-row is-checked"
+                                 @onclick="() => ToggleCheckAsync(item)"
+                                 @onpointerdown="() => OnPointerDown(item)"
+                                 @onpointerup="OnPointerUp"
+                                 @onpointercancel="OnPointerUp">
+                                <div class="task-check checked">
+                                    <span class="material-icons">check</span>
+                                </div>
+                                <span class="task-item-text checked">@item.Text</span>
+                                @if (item.LinkedEntityType != null)
+                                {
+                                    <span class="material-icons task-item-link-icon"
+                                          title="Länkad till budget">link</span>
+                                }
+                            </div>
+                        }
+                    }
+                }
+            }
+        </div>;
+
+    private static string TypeLabel(TaskListType t) => t switch
+    {
+        TaskListType.ToDo     => "Att göra",
+        TaskListType.Shopping => "Inköpslista",
+        TaskListType.Generic  => "Generisk",
+        _                     => t.ToString()
+    };
+}
