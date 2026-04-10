@@ -3,22 +3,6 @@
 @inject IHttpClientFactory HttpFactory
 @inject NavigationManager Nav
 
-<!--
-    PUBLIC READ-ONLY LIST VIEW.
-    BUG 6 FIX: uses a named HttpClient "PublicClient" registered without
-    AuthorizationMessageHandler so no Bearer token is sent (and no
-    exception thrown when there is no token).
-
-    Register in BudgetPlanner.Blazor/Program.cs:
-        builder.Services.AddHttpClient("PublicClient", c =>
-            c.BaseAddress = new Uri(builder.Configuration["ApiBaseUrl"]
-                ?? "https://localhost:7000/"));
-
-    This must be a plain HttpClient, NOT wrapped with
-    services.AddHttpClient("PublicClient")
-             .AddHttpMessageHandler<AuthorizationMessageHandler>()
--->
-
 <div class="public-list-shell">
     @if (_loading)
     {
@@ -56,23 +40,17 @@
             }
         </div>
 
-        @{
-            var activeItems  = _list.Items.Where(i => !i.IsChecked)
-                                          .OrderBy(i => i.SortOrder).ToList();
-            var checkedItems = _list.Items.Where(i => i.IsChecked)
-                                          .OrderByDescending(i => i.CheckedAt).ToList();
-        }
 
         <div style="border-radius:12px;border:.5px solid var(--color-border);
                     overflow:hidden;margin-bottom:16px;background:var(--color-surface)">
-            @if (!activeItems.Any())
+            @if (!ActiveItems.Any())
             {
                 <div style="padding:16px;text-align:center;font-size:.85rem;
                             color:var(--color-muted)">
                     Alla uppgifter är klara! 🎉
                 </div>
             }
-            @foreach (var item in activeItems)
+            @foreach (var item in ActiveItems)
             {
                 <div style="display:flex;align-items:center;gap:12px;padding:13px 16px;
                             border-bottom:.5px solid var(--color-border)">
@@ -84,17 +62,17 @@
             }
         </div>
 
-        @if (checkedItems.Any())
+        @if (CheckedItems.Any())
         {
             <div style="font-size:.78rem;font-weight:600;color:var(--color-muted);
                         text-transform:uppercase;letter-spacing:.05em;
                         margin-bottom:8px;padding-left:4px">
                 @(_list.ListType == TaskListType.Shopping ? "Köpt" : "Klara")
-                (@checkedItems.Count)
+                (@CheckedItems.Count)
             </div>
             <div style="border-radius:12px;border:.5px solid var(--color-border);
                         overflow:hidden;background:var(--color-surface);opacity:.6">
-                @foreach (var item in checkedItems)
+                @foreach (var item in CheckedItems)
                 {
                     <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;
                                 border-bottom:.5px solid var(--color-border)">
@@ -129,6 +107,16 @@
     private PublicTaskListDto? _list;
     private bool _loading = true;
 
+    // FIX RZ1010: computed properties replace the @{ var ... } blocks
+    // that caused "Unexpected { after @" when placed inside the @else body.
+    private List<TaskItemDto> ActiveItems =>
+        _list?.Items.Where(i => !i.IsChecked).OrderBy(i => i.SortOrder).ToList()
+        ?? new List<TaskItemDto>();
+
+    private List<TaskItemDto> CheckedItems =>
+        _list?.Items.Where(i => i.IsChecked).OrderByDescending(i => i.CheckedAt).ToList()
+        ?? new List<TaskItemDto>();
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -137,7 +125,6 @@
         StateHasChanged();
         try
         {
-            // BUG 6 FIX: use named client with no auth handler.
             var http = HttpFactory.CreateClient("PublicClient");
             var resp = await http.GetAsync($"api/lists/public/{Token}");
             _list = resp.IsSuccessStatusCode

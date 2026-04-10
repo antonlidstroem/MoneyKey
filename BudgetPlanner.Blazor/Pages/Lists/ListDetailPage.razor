@@ -152,7 +152,7 @@
             <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "transaction"; }'>
                 <span class="material-icons">swap_horiz</span> Transaktion
             </button>
-            <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "mi"; }'>
+            <button class="more-nav-item" @onclick='() => { _cvPurpose = _actionItem?.Text ?? ""; CloseAction(); _convertMode = "mi"; }'>
                 <span class="material-icons">directions_car</span> Milersättning
             </button>
             <button class="more-nav-item" @onclick='() => { CloseAction(); _convertMode = "vab"; }'>
@@ -249,7 +249,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Syfte</label>
-                    <input class="form-control" value="@_actionItem.Text" @bind="_cvPurpose" />
+                    <input class="form-control" @bind="_cvPurpose" />
                 </div>
                 <div style="display:flex;gap:10px;margin-top:16px">
                     <button class="btn btn-secondary" @onclick='() => _convertMode = null'>Avbryt</button>
@@ -518,7 +518,7 @@
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
-        switch (e.Event)
+        switch (e.EventType)
         {
             case "TaskListArchived":
             case "TaskListDeleted":

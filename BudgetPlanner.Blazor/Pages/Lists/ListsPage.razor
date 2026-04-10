@@ -179,7 +179,7 @@
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
-        if (e.Event.StartsWith("TaskList"))
+        if (e.EventType.StartsWith("TaskList"))
         {
             await LoadAsync();
             await InvokeAsync(StateHasChanged);
