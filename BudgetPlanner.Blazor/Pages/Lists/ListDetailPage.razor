@@ -37,7 +37,6 @@
                 </button>
                 @if (BudgetState.CanEdit)
                 {
-                    <!-- BUG 1 FIX: call OpenEditList() to populate form fields first -->
                     <button class="btn btn-secondary btn-sm" @onclick="OpenEditList">
                         <span class="material-icons" style="font-size:.9rem">edit</span> Redigera
                     </button>
@@ -46,7 +45,6 @@
         </div>
     </div>
 
-    <!-- BUG 2 FIX: real desktop add bar outside the shared RenderFragment -->
     @if (BudgetState.CanEdit && _list != null)
     {
         <div class="list-add-bar" style="--list-color:@_list.ColorHex">
@@ -88,7 +86,6 @@
                 </button>
                 @if (BudgetState.CanEdit)
                 {
-                    <!-- BUG 1 FIX: call OpenEditList() -->
                     <button class="mobile-icon-btn" @onclick="OpenEditList">
                         <span class="material-icons" style="font-size:1rem">edit</span>
                     </button>
@@ -184,12 +181,6 @@
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      CONVERT → TRANSACTION
-     BUG 3 FIX: pass null for EditTransaction (new mode); use the pre-fill
-     description approach via the _prefillTxDescription field that is
-     read by OnTransactionFormInit in TransactionForm.
-     If TransactionForm doesn't support pre-fill, pass a minimal
-     TransactionDto with only Description — the form should handle nulls
-     for all other fields since they're optional.
      ══════════════════════════════════════════════════════════════════════════ -->
 @if (_convertMode == "transaction" && _actionItem != null && _projects != null)
 {
@@ -249,6 +240,7 @@
                 </div>
                 <div class="form-group">
                     <label class="form-label">Syfte</label>
+                    <!-- FIX RZ10008: removed duplicate value= attribute; _cvPurpose is pre-set when opening -->
                     <input class="form-control" @bind="_cvPurpose" />
                 </div>
                 <div style="display:flex;gap:10px;margin-top:16px">
@@ -450,7 +442,6 @@
     private Timer?       _pressTimer;
     private int          _pressItemId = -1;
 
-    // BUG 4 FIX: exposed as property so it can default based on list type
     private bool _boughtExpanded;
 
     private TaskItemDto? _editingItem;
@@ -484,8 +475,6 @@
 
     private string ShareUrl => $"{Nav.BaseUri}lists/public/{_list?.SharedToken}";
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────────
-
     protected override async Task OnInitializedAsync()
     {
         BudgetState.StateChanged += OnStateChanged;
@@ -498,7 +487,7 @@
         if (_shareOpen && _list != null)
         {
             try { await JS.InvokeVoidAsync("renderQrCode", "qr-canvas", ShareUrl); }
-            catch { /* QR lib may not be loaded yet */ }
+            catch { }
         }
     }
 
@@ -514,7 +503,7 @@
         await LoadAsync(); StateHasChanged();
     });
 
-    // BUG 8 FIX: handle archive/delete events by navigating away
+    // FIX CS1061: e.Event → e.EventType  (BudgetHubEvent has no 'Event' property)
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
@@ -522,7 +511,6 @@
         {
             case "TaskListArchived":
             case "TaskListDeleted":
-                // If this is our list, navigate back.
                 Nav.NavigateTo("/lists");
                 break;
             case var ev when ev.StartsWith("TaskItem") || ev == "TaskListUpdated" || ev == "TaskListReordered":
@@ -540,13 +528,9 @@
 
         if (_list == null) { Nav.NavigateTo("/lists"); return; }
 
-        // BUG 4 FIX: for ToDo/Generic lists, default bought section to open
-        // so completed items are visible without an extra tap.
         if (_list.ListType != TaskListType.Shopping)
             _boughtExpanded = true;
     }
-
-    // ── Add item ───────────────────────────────────────────────────────────────
 
     private async Task OnAddKeydown(KeyboardEventArgs e)
     {
@@ -560,7 +544,6 @@
         _adding  = true;
         _newText = "";
 
-        // Optimistic: add to local list immediately.
         var optimistic = new TaskItemDto
         {
             Id        = -1,
@@ -581,10 +564,9 @@
             {
                 var idx = _list?.Items.IndexOf(optimistic) ?? -1;
                 if (idx >= 0 && _list != null) _list.Items[idx] = result;
-                // Refresh counts.
                 if (_list != null)
                 {
-                    _list.TotalItems = _list.Items.Count;
+                    _list.TotalItems   = _list.Items.Count;
                     _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
                 }
             }
@@ -606,8 +588,6 @@
         }
     }
 
-    // ── Check / uncheck ────────────────────────────────────────────────────────
-
     private async Task ToggleCheckAsync(TaskItemDto item)
     {
         var original   = item.IsChecked;
@@ -615,7 +595,6 @@
         item.CheckedAt = item.IsChecked ? DateTime.UtcNow : null;
         _pendingChecks[item.Id] = item.IsChecked;
 
-        // Update summary counts optimistically.
         if (_list != null)
             _list.CheckedItems = _list.Items.Count(i => i.IsChecked);
 
@@ -647,8 +626,6 @@
         finally { _pendingChecks.Remove(item.Id); }
     }
 
-    // ── Long press ─────────────────────────────────────────────────────────────
-
     private void OnPointerDown(TaskItemDto item)
     {
         _pressItemId = item.Id;
@@ -671,8 +648,6 @@
     }
 
     private void CloseAction() { _actionItem = null; _confirmDeleteItem = false; }
-
-    // ── Action handlers ────────────────────────────────────────────────────────
 
     private async Task ActionToggleCheck()
     {
@@ -716,8 +691,6 @@
         }
         else { Toast.Error("Kunde inte ta bort uppgiften."); }
     }
-
-    // ── Convert ────────────────────────────────────────────────────────────────
 
     private async Task OnTransactionConverted(TransactionDto tx)
     {
@@ -778,8 +751,6 @@
         finally { _converting = false; }
     }
 
-    // ── Share ──────────────────────────────────────────────────────────────────
-
     private async Task CopyShareLink()
     {
         try
@@ -790,7 +761,6 @@
         catch { Toast.Error("Kunde inte kopiera länken."); }
     }
 
-    // BUG 1 FIX: OpenEditList populates all form fields before opening sheet
     private void OpenEditList()
     {
         if (_list == null) return;
@@ -821,8 +791,6 @@
         Toast.Success("Lista arkiverad.");
         Nav.NavigateTo("/lists");
     }
-
-    // ── Shared content ─────────────────────────────────────────────────────────
 
     private RenderFragment ListContent() =>
         @<div style="--list-color:@(_list?.ColorHex ?? "#1565C0")">

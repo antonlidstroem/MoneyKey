@@ -156,8 +156,6 @@
         "#00838F","#37474F","#AD1457","#4E342E","#1B5E20"
     };
 
-    // ── Lifecycle ──────────────────────────────────────────────────────────────
-
     protected override async Task OnInitializedAsync()
     {
         BudgetState.StateChanged += OnStateChanged;
@@ -176,6 +174,7 @@
         await LoadAsync(); StateHasChanged();
     });
 
+    // FIX: e.Event → e.EventType  (BudgetHubEvent has no 'Event' property)
     private async Task OnSignalR(State.BudgetHubEvent e)
     {
         if (e.BudgetId != BudgetState.ActiveBudgetId) return;
@@ -194,8 +193,6 @@
         _lists   = result ?? new();
         _loading = false;
     }
-
-    // ── Create ─────────────────────────────────────────────────────────────────
 
     private async Task CreateAsync()
     {
@@ -224,8 +221,6 @@
         catch (Exception ex) { Toast.Error(ex.Message); }
         finally { _saving = false; }
     }
-
-    // ── Shared content ─────────────────────────────────────────────────────────
 
     private RenderFragment ListsContent() =>
         @<div>
