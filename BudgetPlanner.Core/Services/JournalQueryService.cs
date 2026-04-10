@@ -1,7 +1,24 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// REPLACE JournalQueryService IN: BudgetPlanner.Core/Services/Services.cs
-// BUG 9 FIX: adds ITaskListRepository to constructor + FetchTaskListsAsync method
+// BudgetPlanner.Core/Services/JournalQueryService.cs
+//
+// REPLACE the entire contents of this file (if it already exists) OR
+// SAVE as a new file at BudgetPlanner.Core/Services/JournalQueryService.cs
+//
+// Root-cause of all the CS0246 errors in document 16:
+//   The file was missing ALL using directives so the compiler could not resolve
+//   ITransactionRepository, JournalEntryDto, JournalQuery, ReceiptBatchStatus, etc.
+//
+// This file also adds ITaskListRepository as the 5th constructor parameter
+// (Phase 3 journal integration) and keeps the sequential-await pattern required
+// by EF Core's single-scoped DbContext rule.
 // ═══════════════════════════════════════════════════════════════════════════════
+using BudgetPlanner.Core.DTOs;          // JournalEntryDto, JournalQuery, SummaryDto,
+                                         // KonteringRowDto, TransactionQuery, ReceiptQuery
+using BudgetPlanner.DAL.Repositories;  // ITransactionRepository, IMilersattningRepository,
+                                         // IVabRepository, IReceiptRepository, ITaskListRepository
+using BudgetPlanner.Domain.Enums;      // JournalEntryType, ReceiptBatchStatus
+
+namespace BudgetPlanner.Core.Services;
 
 public class JournalQueryService
 {
@@ -16,7 +33,7 @@ public class JournalQueryService
         IMilersattningRepository miRepo,
         IVabRepository           vabRepo,
         IReceiptRepository       receiptRepo,
-        ITaskListRepository      taskListRepo)
+        ITaskListRepository      taskListRepo)   // 5th param — Phase 3
     {
         _txRepo       = txRepo;
         _miRepo       = miRepo;
@@ -25,6 +42,16 @@ public class JournalQueryService
         _taskListRepo = taskListRepo;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Returns (pagedItems, totalCount, summaryOverAllItems).
+    // Summary is computed on ALL filtered items BEFORE pagination so the
+    // KPI strip in the UI always shows totals for the whole dataset, not
+    // just the visible page.
+    //
+    // IMPORTANT: all fetches are sequential awaits — never Task.WhenAll.
+    // All repositories share one scoped BudgetDbContext; parallel async
+    // operations on it throw "A second operation was started on this context".
+    // ─────────────────────────────────────────────────────────────────────────
     public async Task<(List<JournalEntryDto> Items, int TotalCount, SummaryDto Summary)>
         QueryAsync(JournalQuery q)
     {
@@ -32,8 +59,6 @@ public class JournalQueryService
             ? q.IncludeTypes.ToHashSet()
             : new HashSet<JournalEntryType>(Enum.GetValues<JournalEntryType>());
 
-        // Sequential awaits — never Task.WhenAll across repositories sharing
-        // one scoped BudgetDbContext (EF Core forbids concurrent operations).
         var all = new List<JournalEntryDto>();
 
         if (include.Contains(JournalEntryType.Transaction))
@@ -61,10 +86,8 @@ public class JournalQueryService
             ("amount",      _)     => all.OrderByDescending(e => e.Amount).ToList(),
             ("description", "asc") => all.OrderBy(e => e.Description).ToList(),
             ("description", _)     => all.OrderByDescending(e => e.Description).ToList(),
-            ("type",        "asc") => all.OrderBy(e => e.TypeLabel)
-                                        .ThenByDescending(e => e.Date).ToList(),
-            ("type",        _)     => all.OrderByDescending(e => e.TypeLabel)
-                                        .ThenByDescending(e => e.Date).ToList(),
+            ("type",        "asc") => all.OrderBy(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
+            ("type",        _)     => all.OrderByDescending(e => e.TypeLabel).ThenByDescending(e => e.Date).ToList(),
             _                      => all.OrderByDescending(e => e.Date).ToList()
         };
 
@@ -77,11 +100,10 @@ public class JournalQueryService
 
     public SummaryDto ComputeSummary(List<JournalEntryDto> entries)
     {
-        // Task lists have Amount = 0, so they don't affect summary totals —
-        // they are intentionally excluded from the receipt-style "countable" filter.
+        // TaskLists have Amount = 0 and must not appear as income or expense.
         var countable = entries.Where(e =>
-            e.EntryType != JournalEntryType.ReceiptBatch &&
-            e.EntryType != JournalEntryType.TaskList ||
+            (e.EntryType != JournalEntryType.ReceiptBatch &&
+             e.EntryType != JournalEntryType.TaskList) ||
             e.Status is "Godkänd" or "Utbetald").ToList();
 
         return new SummaryDto
@@ -97,7 +119,7 @@ public class JournalQueryService
         };
     }
 
-    // ── Private fetchers (all sequential — no concurrent DbContext access) ─────
+    // ── Private fetchers ──────────────────────────────────────────────────────
 
     private async Task<List<JournalEntryDto>> FetchTransactionsAsync(JournalQuery q)
     {
@@ -183,11 +205,11 @@ public class JournalQueryService
             BudgetId        = q.BudgetId,
             Page            = 1,
             PageSize        = int.MaxValue,
-            ProjectId       = q.FilterByProject   ? q.ProjectId       : null,
+            ProjectId       = q.FilterByProject   ? q.ProjectId      : null,
             Statuses        = q.ReceiptStatuses.Count > 0 ? q.ReceiptStatuses : null,
-            CreatedByUserId = q.FilterByCreatedBy ? q.CreatedByUserId  : null,
-            FromDate        = q.FilterByStartDate  ? q.StartDate       : null,
-            ToDate          = q.FilterByEndDate    ? q.EndDate         : null
+            CreatedByUserId = q.FilterByCreatedBy  ? q.CreatedByUserId : null,
+            FromDate        = q.FilterByStartDate  ? q.StartDate      : null,
+            ToDate          = q.FilterByEndDate    ? q.EndDate        : null
         };
         var (batches, _) = await _receiptRepo.GetPagedAsync(rq);
         return batches.Select(b => new JournalEntryDto
@@ -215,14 +237,13 @@ public class JournalQueryService
         var lists = await _taskListRepo.GetForBudgetAsync(q.BudgetId, includeArchived: false);
         return lists.Select(l =>
         {
-            var total   = l.Items.Count;
+            var total    = l.Items.Count;
             var checked_ = l.Items.Count(i => i.IsChecked);
             return new JournalEntryDto
             {
                 EntryType      = JournalEntryType.TaskList,
                 TypeLabel      = "Lista",
                 TypeCode       = "L",
-                // Sort by last activity so recently updated lists appear first.
                 Date           = l.UpdatedAt ?? l.CreatedAt,
                 Amount         = 0m,
                 Description    = $"{l.Emoji} {l.Title}",
@@ -235,7 +256,8 @@ public class JournalQueryService
         }).ToList();
     }
 
-    private static List<JournalEntryDto> ApplySharedFilters(List<JournalEntryDto> all, JournalQuery q)
+    private static List<JournalEntryDto> ApplySharedFilters(
+        List<JournalEntryDto> all, JournalQuery q)
     {
         if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description))
             all = all.Where(e => e.Description?.Contains(

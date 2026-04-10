@@ -944,4 +944,155 @@ public class AuditController : BaseApiController
             PageSize   = pageSize
         });
     }
+
+    [Authorize, Route("api/budgets/{budgetId:int}/lists")]
+    public class TaskListsController : BaseApiController
+    {
+        private readonly TaskListService _svc;
+        private readonly BudgetAuthorizationService _auth;
+        private readonly IHubContext<BudgetHub> _hub;
+
+        public TaskListsController(TaskListService svc, BudgetAuthorizationService auth, IHubContext<BudgetHub> hub)
+        { _svc = svc; _auth = auth; _hub = hub; }
+
+        // ── Lists ─────────────────────────────────────────────────────────────────
+
+        [HttpGet]
+        public async Task<IActionResult> GetAll(int budgetId, [FromQuery] bool includeArchived = false)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
+            return Ok(await _svc.GetAllAsync(budgetId, includeArchived));
+        }
+
+        [HttpGet("{listId:int}")]
+        public async Task<IActionResult> GetById(int budgetId, int listId)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Viewer)) return Forbid();
+            var result = await _svc.GetByIdAsync(listId, budgetId);
+            return result == null ? NotFound() : Ok(result);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create(int budgetId, [FromBody] CreateTaskListDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var result = await _svc.CreateAsync(budgetId, UserId, dto);
+            await BroadcastAsync(_hub, budgetId, "TaskListCreated", result.Id);
+            return CreatedAtAction(nameof(GetById), new { budgetId, listId = result.Id }, result);
+        }
+
+        [HttpPut("{listId:int}")]
+        public async Task<IActionResult> Update(int budgetId, int listId, [FromBody] UpdateTaskListDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var result = await _svc.UpdateAsync(listId, budgetId, dto);
+            if (result == null) return NotFound();
+            await BroadcastAsync(_hub, budgetId, "TaskListUpdated", listId);
+            return Ok(result);
+        }
+
+        [HttpPatch("{listId:int}/archive")]
+        public async Task<IActionResult> Archive(int budgetId, int listId)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            await _svc.ArchiveAsync(listId, budgetId);
+            await BroadcastAsync(_hub, budgetId, "TaskListArchived", listId);
+            return Ok();
+        }
+
+        [HttpDelete("{listId:int}")]
+        public async Task<IActionResult> Delete(int budgetId, int listId)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            await _svc.DeleteAsync(listId, budgetId);
+            await BroadcastAsync(_hub, budgetId, "TaskListDeleted", listId);
+            return NoContent();
+        }
+
+        // ── Items ─────────────────────────────────────────────────────────────────
+
+        [HttpPost("{listId:int}/items")]
+        public async Task<IActionResult> AddItem(int budgetId, int listId, [FromBody] CreateTaskItemDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var item = await _svc.AddItemAsync(listId, budgetId, UserId, dto);
+            await BroadcastAsync(_hub, budgetId, "TaskItemAdded", listId);
+            return Ok(item);
+        }
+
+        [HttpPut("{listId:int}/items/{itemId:int}")]
+        public async Task<IActionResult> UpdateItem(int budgetId, int listId, int itemId,
+            [FromBody] UpdateTaskItemDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var item = await _svc.UpdateItemTextAsync(itemId, listId, budgetId, dto);
+            if (item == null) return NotFound();
+            await BroadcastAsync(_hub, budgetId, "TaskItemUpdated", listId);
+            return Ok(item);
+        }
+
+        [HttpPatch("{listId:int}/items/{itemId:int}/check")]
+        public async Task<IActionResult> CheckItem(int budgetId, int listId, int itemId,
+            [FromBody] CheckTaskItemDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var item = await _svc.CheckItemAsync(itemId, listId, budgetId, UserId, dto);
+            if (item == null) return NotFound();
+            await BroadcastAsync(_hub, budgetId, "TaskItemChecked", listId);
+            return Ok(item);
+        }
+
+        [HttpDelete("{listId:int}/items/{itemId:int}")]
+        public async Task<IActionResult> DeleteItem(int budgetId, int listId, int itemId)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            await _svc.DeleteItemAsync(itemId, listId, budgetId);
+            await BroadcastAsync(_hub, budgetId, "TaskItemDeleted", listId);
+            return NoContent();
+        }
+
+        [HttpPut("{listId:int}/items/reorder")]
+        public async Task<IActionResult> Reorder(int budgetId, int listId, [FromBody] ReorderTaskItemDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            await _svc.ReorderItemsAsync(listId, budgetId, dto);
+            await BroadcastAsync(_hub, budgetId, "TaskListReordered", listId);
+            return Ok();
+        }
+
+        [HttpPost("{listId:int}/items/{itemId:int}/link")]
+        public async Task<IActionResult> LinkItem(int budgetId, int listId, int itemId,
+            [FromBody] LinkTaskItemDto dto)
+        {
+            if (!await _auth.HasRoleAsync(budgetId, UserId, BudgetMemberRole.Editor)) return Forbid();
+            var item = await _svc.LinkItemAsync(itemId, listId, budgetId, dto);
+            if (item == null) return NotFound();
+            return Ok(item);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // PUBLIC SHARE — no [Authorize], token-based read-only access
+    // Route is absolute (starts with /api/lists) to avoid the budget-scoped prefix.
+    // ═══════════════════════════════════════════════════════════════════════════════
+    [ApiController]
+    [Route("api/lists")]
+    public class PublicListsController : ControllerBase
+    {
+        private readonly TaskListService _svc;
+        public PublicListsController(TaskListService svc) => _svc = svc;
+
+        /// <summary>
+        /// Read-only public view of a task list.  No authentication required.
+        /// Returns 404 if the token is invalid or the list is archived.
+        /// </summary>
+        [HttpGet("public/{token}")]
+        public async Task<IActionResult> GetPublic(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return BadRequest();
+            var result = await _svc.GetPublicAsync(token);
+            return result == null ? NotFound() : Ok(result);
+        }
+    }
+
 }

@@ -1,3 +1,11 @@
+// BudgetPlanner.API/Program.cs — COMPLETE REPLACEMENT
+//
+// KEY CHANGE vs current file:
+//   JournalQueryService now has 5 constructor params. The DI container will
+//   automatically inject ITaskListRepository (already registered below) as the
+//   5th arg, so no special change is required beyond making sure both registrations
+//   exist in the same file.  They are already present from Phase 1 work; this file
+//   just confirms the final complete, unambiguous version.
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -16,29 +24,21 @@ var builder = WebApplication.CreateBuilder(args);
 var cfg  = builder.Configuration;
 var svcs = builder.Services;
 
-svcs.AddScoped<TaskListService>();
-svcs.AddScoped<ITaskListRepository, TaskListRepository>();
-svcs.AddScoped<ITaskItemRepository, TaskItemRepository>();
-
-// ── Fail-fast: validate critical secrets before any service is registered ────
+// ── Fail-fast secret validation ───────────────────────────────────────────────
 var jwtSecret = cfg["Jwt:Secret"];
 if (string.IsNullOrWhiteSpace(jwtSecret) || jwtSecret.Length < 32)
     throw new InvalidOperationException(
-        "Jwt:Secret must be configured and at least 32 characters. " +
-        "Use 'dotnet user-secrets' in development or environment variables in production. " +
-        "Example: dotnet user-secrets set \"Jwt:Secret\" \"$(openssl rand -base64 48)\"");
+        "Jwt:Secret must be configured and at least 32 characters.");
 
 var connStr = cfg.GetConnectionString("DefaultConnection");
 if (string.IsNullOrWhiteSpace(connStr))
     throw new InvalidOperationException(
-        "ConnectionStrings:DefaultConnection must be configured. " +
-        "Use 'dotnet user-secrets set \"ConnectionStrings:DefaultConnection\" \"...\"'");
+        "ConnectionStrings:DefaultConnection must be configured.");
 
 // ── Infrastructure ────────────────────────────────────────────────────────────
 svcs.AddHttpContextAccessor();
-svcs.AddMemoryCache();  // required by ImportService session store
+svcs.AddMemoryCache();
 
-// FIX: Register against the DAL interface — the one AuditInterceptor is injected with.
 svcs.AddScoped<BudgetPlanner.DAL.Data.ICurrentUserAccessor, HttpCurrentUserAccessor>();
 svcs.AddScoped<AuditInterceptor>();
 
@@ -83,7 +83,8 @@ svcs.AddAuthentication(opt =>
         OnMessageReceived = ctx =>
         {
             var token = ctx.Request.Query["access_token"];
-            if (!string.IsNullOrEmpty(token) && ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+            if (!string.IsNullOrEmpty(token) &&
+                ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
                 ctx.Token = token;
             return Task.CompletedTask;
         }
@@ -120,6 +121,13 @@ svcs.AddScoped<IReceiptRepository,       ReceiptRepository>();
 svcs.AddScoped<IAuditRepository,         AuditRepository>();
 svcs.AddScoped<IAppSettingRepository,    AppSettingRepository>();
 
+// ── Task list repositories (Phase 1) ──────────────────────────────────────────
+// REQUIRED: JournalQueryService now has ITaskListRepository as its 5th
+// constructor parameter.  Without this registration the app fails at startup
+// with "Unable to resolve service for type ITaskListRepository".
+svcs.AddScoped<ITaskListRepository, TaskListRepository>();
+svcs.AddScoped<ITaskItemRepository, TaskItemRepository>();
+
 // ── Services ───────────────────────────────────────────────────────────────────
 svcs.AddScoped<TokenService>();
 svcs.AddScoped<BudgetAuthorizationService>();
@@ -129,7 +137,8 @@ svcs.AddScoped<BudgetCalculationService>();
 svcs.AddScoped<ExportService>();
 svcs.AddScoped<ImportService>();
 svcs.AddScoped<ReceiptService>();
-svcs.AddScoped<JournalQueryService>();
+svcs.AddScoped<JournalQueryService>();   // DI will inject ITaskListRepository automatically
+svcs.AddScoped<TaskListService>();
 svcs.AddScoped<IReceiptAttachmentService, NoOpReceiptAttachmentService>();
 
 // ── Email ─────────────────────────────────────────────────────────────────────
@@ -150,22 +159,25 @@ svcs.AddSwaggerGen(c =>
     });
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {{
-        new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+        new OpenApiSecurityScheme
+        {
+            Reference = new OpenApiReference
+            {
+                Type = ReferenceType.SecurityScheme, Id = "Bearer"
+            }
+        },
         Array.Empty<string>()
     }});
 });
 
 var app = builder.Build();
 
-// ── Migrate + seed ─────────────────────────────────────────────────────────────
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();
     scope.ServiceProvider.GetRequiredService<BudgetDbContext>().Database.Migrate();
 }
 
-// Create first-run admin only when the database is empty (no users).
-// Credentials come from AdminSetup config — never from source code.
 await DbInitializer.InitializeAsync(app.Services);
 
 app.UseSwagger();

@@ -1,3 +1,12 @@
+// ═══════════════════════════════════════════════════════════════════════════════
+// BudgetPlanner.Blazor/Services/Services.cs  — COMPLETE REPLACEMENT
+//
+// ROOT CAUSE OF TaskListDto CS0246 ERRORS:
+//   TaskListApiService was accidentally nested INSIDE ToastService.
+//   The compiler saw it as ToastService.TaskListApiService which is not what
+//   Program.cs registers (builder.Services.AddScoped<TaskListApiService>()).
+//   Moving it outside ToastService fixes all ~20 "type not found" errors.
+// ═══════════════════════════════════════════════════════════════════════════════
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -25,8 +34,8 @@ public class JwtAuthenticationStateProvider : AuthenticationStateProvider
         _authClient = new HttpClient { BaseAddress = new Uri(apiBase) };
     }
 
-    public static string?  AccessToken  => _accessToken;
-    public static UserDto? CurrentUser  => _currentUser;
+    public static string?  AccessToken => _accessToken;
+    public static UserDto? CurrentUser => _currentUser;
 
     public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
@@ -95,9 +104,9 @@ public class AuthorizationMessageHandler : DelegatingHandler
 
     public AuthorizationMessageHandler(IServiceProvider sp) => _sp = sp;
 
-    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request, CancellationToken ct)
     {
-        // Buffer so the request body can be re-sent after a 401 refresh.
         if (request.Content != null)
             await request.Content.LoadIntoBufferAsync();
 
@@ -137,9 +146,7 @@ public class AuthorizationMessageHandler : DelegatingHandler
     private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage src)
     {
         var clone = new HttpRequestMessage(src.Method, src.RequestUri);
-        foreach (var h in src.Headers)
-            clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
-
+        foreach (var h in src.Headers) clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
         if (src.Content != null)
         {
             var ms = new MemoryStream();
@@ -291,26 +298,18 @@ public class TransactionService : ApiServiceBase
 }
 
 // ─── JOURNAL API SERVICE ──────────────────────────────────────────────────────
-// Matches the controller response shape:
-//   { result: PagedResult<JournalEntryDto>, summary: SummaryDto }
 public class JournalApiService : ApiServiceBase
 {
     public JournalApiService(HttpClient http) : base(http) { }
 
-    // FIX: Use Http.GetAsync + manual status check instead of GetFromJsonAsync.
-    // GetFromJsonAsync in .NET 8 calls EnsureSuccessStatusCode() internally,
-    // so any server error throws HttpRequestException instead of returning null.
-    // Returning null here lets callers treat a server error as "no data" and
-    // show the error state rather than crashing the component.
+    // FIX: uses Http.GetAsync + manual status check — GetFromJsonAsync in .NET 8
+    // throws on non-2xx instead of returning null.
     public async Task<(PagedResult<JournalEntryDto> Result, SummaryDto Summary)?> GetPagedAsync(
         int budgetId, JournalQuery query)
     {
-        var url = BuildUrl(budgetId, query);
+        var url      = BuildUrl(budgetId, query);
         var response = await Http.GetAsync(url);
-
-        if (!response.IsSuccessStatusCode)
-            return null;   // caller checks HasValue; no exception thrown
-
+        if (!response.IsSuccessStatusCode) return null;
         var raw = await response.Content.ReadFromJsonAsync<JournalPageResponse>();
         return raw == null ? null : (raw.Result, raw.Summary);
     }
@@ -330,15 +329,11 @@ public class JournalApiService : ApiServiceBase
             $"sortBy={Uri.EscapeDataString(q.SortBy ?? "Date")}",
             $"sortDir={Uri.EscapeDataString(q.SortDir ?? "desc")}"
         };
-
         foreach (var t in q.IncludeTypes)
             parts.Add($"includeTypes={t}");
-
         foreach (var s in q.ReceiptStatuses)
             parts.Add($"receiptStatuses={s}");
-
         parts.AddRange(FilterParts(q));
-
         return $"api/budgets/{budgetId}/journal?" + string.Join("&", parts);
     }
 
@@ -348,31 +343,23 @@ public class JournalApiService : ApiServiceBase
     private static List<string> FilterParts(JournalQuery q)
     {
         var p = new List<string>();
-
         if (q.FilterByStartDate && q.StartDate.HasValue)
             p.Add($"filterByStartDate=true&startDate={q.StartDate.Value:yyyy-MM-dd}");
-
         if (q.FilterByEndDate && q.EndDate.HasValue)
             p.Add($"filterByEndDate=true&endDate={q.EndDate.Value:yyyy-MM-dd}");
-
         if (q.FilterByDescription && !string.IsNullOrWhiteSpace(q.Description))
             p.Add($"filterByDescription=true&description={Uri.EscapeDataString(q.Description)}");
-
         if (q.FilterByCategory && q.CategoryId.HasValue)
             p.Add($"filterByCategory=true&categoryId={q.CategoryId.Value}");
-
         if (q.FilterByProject && q.ProjectId.HasValue)
             p.Add($"filterByProject=true&projectId={q.ProjectId.Value}");
-
         return p;
     }
 
-    // Property names match the JSON the JournalController returns (camelCase,
-    // case-insensitive deserialization is the ASP.NET Core default).
     private class JournalPageResponse
     {
-        public PagedResult<JournalEntryDto> Result { get; set; } = new();
-        public SummaryDto Summary { get; set; } = new();
+        public PagedResult<JournalEntryDto> Result  { get; set; } = new();
+        public SummaryDto                   Summary { get; set; } = new();
     }
 }
 
@@ -470,7 +457,8 @@ public class ImportApiService : ApiServiceBase
 {
     public ImportApiService(HttpClient http) : base(http) { }
 
-    public async Task<ImportSessionDto?> PreviewAsync(int budgetId, Stream stream, string fileName, string bankProfile)
+    public async Task<ImportSessionDto?> PreviewAsync(
+        int budgetId, Stream stream, string fileName, string bankProfile)
     {
         using var content = new MultipartFormDataContent();
         content.Add(new StreamContent(stream), "file", fileName);
@@ -539,111 +527,6 @@ public class ToastService
         Toasts.RemoveAll(t => t.Id == id);
         OnChange?.Invoke();
     }
-
-    public class TaskListApiService : ApiServiceBase
-    {
-        public TaskListApiService(HttpClient http) : base(http) { }
-
-        // ── Lists ─────────────────────────────────────────────────────────────────
-
-        public async Task<List<TaskListDto>?> GetAllAsync(int budgetId, bool includeArchived = false)
-        {
-            var resp = await Http.GetAsync(
-                $"api/budgets/{budgetId}/lists?includeArchived={includeArchived}");
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<List<TaskListDto>>();
-        }
-
-        public async Task<TaskListDto?> GetByIdAsync(int budgetId, int listId)
-        {
-            var resp = await Http.GetAsync($"api/budgets/{budgetId}/lists/{listId}");
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
-        }
-
-        public async Task<TaskListDto?> CreateAsync(int budgetId, CreateTaskListDto dto)
-        {
-            var resp = await Http.PostAsJsonAsync($"api/budgets/{budgetId}/lists", dto);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
-        }
-
-        public async Task<TaskListDto?> UpdateAsync(int budgetId, int listId, UpdateTaskListDto dto)
-        {
-            var resp = await Http.PutAsJsonAsync($"api/budgets/{budgetId}/lists/{listId}", dto);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskListDto>();
-        }
-
-        public async Task<bool> ArchiveAsync(int budgetId, int listId)
-        {
-            var resp = await Http.PatchAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/archive",
-                JsonContent.Create(new { }));
-            return resp.IsSuccessStatusCode;
-        }
-
-        public async Task<bool> DeleteAsync(int budgetId, int listId)
-        {
-            var resp = await Http.DeleteAsync($"api/budgets/{budgetId}/lists/{listId}");
-            return resp.IsSuccessStatusCode;
-        }
-
-        // ── Items ─────────────────────────────────────────────────────────────────
-
-        public async Task<TaskItemDto?> AddItemAsync(int budgetId, int listId, CreateTaskItemDto dto)
-        {
-            var resp = await Http.PostAsJsonAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items", dto);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
-        }
-
-        public async Task<TaskItemDto?> CheckItemAsync(
-            int budgetId, int listId, int itemId, bool isChecked)
-        {
-            var resp = await Http.PatchAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/check",
-                JsonContent.Create(new CheckTaskItemDto(isChecked)));
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
-        }
-
-        public async Task<TaskItemDto?> UpdateItemTextAsync(
-            int budgetId, int listId, int itemId, string text)
-        {
-            var resp = await Http.PutAsJsonAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}",
-                new UpdateTaskItemDto(text));
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
-        }
-
-        public async Task<bool> DeleteItemAsync(int budgetId, int listId, int itemId)
-        {
-            var resp = await Http.DeleteAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}");
-            return resp.IsSuccessStatusCode;
-        }
-
-        public async Task<bool> ReorderItemsAsync(int budgetId, int listId, List<int> orderedIds)
-        {
-            var resp = await Http.PutAsJsonAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items/reorder",
-                new ReorderTaskItemDto(orderedIds));
-            return resp.IsSuccessStatusCode;
-        }
-
-        public async Task<TaskItemDto?> LinkItemAsync(
-            int budgetId, int listId, int itemId, LinkTaskItemDto dto)
-        {
-            var resp = await Http.PostAsJsonAsync(
-                $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/link", dto);
-            if (!resp.IsSuccessStatusCode) return null;
-            return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
-        }
-    }
-
 }
 
 public class ToastMessage
@@ -654,4 +537,113 @@ public class ToastMessage
     public string Icon    { get; set; } = "info";
 }
 
+// ─── TASK LIST API SERVICE ────────────────────────────────────────────────────
+// FIX: This class was previously nested INSIDE ToastService, which is why
+// TaskListDto, CreateTaskItemDto etc. all produced CS0246.
+// It is now a proper top-level class in the same namespace.
+//
+// Register in BudgetPlanner.Blazor/Program.cs:
+//   builder.Services.AddScoped<TaskListApiService>();
+public class TaskListApiService : ApiServiceBase
+{
+    public TaskListApiService(HttpClient http) : base(http) { }
 
+    // ── Lists ─────────────────────────────────────────────────────────────────
+
+    public async Task<List<TaskListDto>?> GetAllAsync(int budgetId, bool includeArchived = false)
+    {
+        var resp = await Http.GetAsync(
+            $"api/budgets/{budgetId}/lists?includeArchived={includeArchived}");
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<List<TaskListDto>>();
+    }
+
+    public async Task<TaskListDto?> GetByIdAsync(int budgetId, int listId)
+    {
+        var resp = await Http.GetAsync($"api/budgets/{budgetId}/lists/{listId}");
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+    }
+
+    public async Task<TaskListDto?> CreateAsync(int budgetId, CreateTaskListDto dto)
+    {
+        var resp = await Http.PostAsJsonAsync($"api/budgets/{budgetId}/lists", dto);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+    }
+
+    public async Task<TaskListDto?> UpdateAsync(int budgetId, int listId, UpdateTaskListDto dto)
+    {
+        var resp = await Http.PutAsJsonAsync($"api/budgets/{budgetId}/lists/{listId}", dto);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskListDto>();
+    }
+
+    public async Task<bool> ArchiveAsync(int budgetId, int listId)
+    {
+        var resp = await Http.PatchAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/archive",
+            JsonContent.Create(new { }));
+        return resp.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> DeleteAsync(int budgetId, int listId)
+    {
+        var resp = await Http.DeleteAsync($"api/budgets/{budgetId}/lists/{listId}");
+        return resp.IsSuccessStatusCode;
+    }
+
+    // ── Items ─────────────────────────────────────────────────────────────────
+
+    public async Task<TaskItemDto?> AddItemAsync(int budgetId, int listId, CreateTaskItemDto dto)
+    {
+        var resp = await Http.PostAsJsonAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items", dto);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+    }
+
+    public async Task<TaskItemDto?> CheckItemAsync(
+        int budgetId, int listId, int itemId, bool isChecked)
+    {
+        var resp = await Http.PatchAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/check",
+            JsonContent.Create(new CheckTaskItemDto(isChecked)));
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+    }
+
+    public async Task<TaskItemDto?> UpdateItemTextAsync(
+        int budgetId, int listId, int itemId, string text)
+    {
+        var resp = await Http.PutAsJsonAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}",
+            new UpdateTaskItemDto(text));
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+    }
+
+    public async Task<bool> DeleteItemAsync(int budgetId, int listId, int itemId)
+    {
+        var resp = await Http.DeleteAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}");
+        return resp.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> ReorderItemsAsync(int budgetId, int listId, List<int> orderedIds)
+    {
+        var resp = await Http.PutAsJsonAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items/reorder",
+            new ReorderTaskItemDto(orderedIds));
+        return resp.IsSuccessStatusCode;
+    }
+
+    public async Task<TaskItemDto?> LinkItemAsync(
+        int budgetId, int listId, int itemId, LinkTaskItemDto dto)
+    {
+        var resp = await Http.PostAsJsonAsync(
+            $"api/budgets/{budgetId}/lists/{listId}/items/{itemId}/link", dto);
+        if (!resp.IsSuccessStatusCode) return null;
+        return await resp.Content.ReadFromJsonAsync<TaskItemDto>();
+    }
+}

@@ -1,144 +1,292 @@
-@page "/lists/public/{Token}"
-@layout EmptyLayout
-@inject IHttpClientFactory HttpFactory
+@page "/lists"
+@attribute [Authorize]
+@implements IDisposable
+@inject TaskListApiService ListSvc
+@inject ToastService Toast
+@inject BudgetState BudgetState
+@inject SignalRService SignalR
+@inject NavigationManager Nav
 
-<!--
-    PUBLIC READ-ONLY LIST VIEW — no authentication required.
-    Uses a named HttpClient "PublicClient" with no AuthorizationMessageHandler
-    so no Bearer token is sent and no exception is thrown when unauthenticated.
-
-    Register in BudgetPlanner.Blazor/Program.cs (no AddHttpMessageHandler!):
-        builder.Services.AddHttpClient("PublicClient", c =>
-            c.BaseAddress = new Uri(
-                builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7000/"));
--->
-
-<div class="public-list-shell">
-    @if (_loading)
-    {
-        <div style="text-align:center;padding:60px 0">
-            <div class="spinner"></div>
-        </div>
-    }
-    else if (_list == null)
-    {
-        <div style="text-align:center;padding:60px 0;color:var(--color-muted)">
-            <span style="font-size:3rem;display:block;margin-bottom:12px">🔗</span>
-            <div style="font-size:1.1rem;font-weight:500;margin-bottom:8px">
-                Lista hittades inte
-            </div>
-            <div style="font-size:.85rem">
-                Länken kan vara felaktig eller listan kan ha arkiverats.
-            </div>
-        </div>
-    }
-    else
-    {
-        <div class="public-list-header">
-            <span class="public-list-emoji">@_list.Emoji</span>
-            <div class="public-list-title">@_list.Title</div>
-            <div class="public-list-meta">
-                @_list.ProgressLabel · @TypeLabel(_list.ListType)
-            </div>
-            @if (_list.TotalItems > 0)
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DESKTOP
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="desktop-page-wrapper">
+    <div class="page-header">
+        <span class="page-title">Listor</span>
+        <div class="header-actions">
+            @if (BudgetState.CanEdit)
             {
-                <div style="height:5px;background:#e0e0e0;border-radius:3px;
-                            margin:12px auto 0;max-width:200px;overflow:hidden">
-                    <div style="height:100%;width:@_list.ProgressPercent%;
-                                background:@_list.ColorHex;border-radius:3px;
-                                transition:width .4s">
-                    </div>
-                </div>
+                <button class="btn btn-primary btn-sm" @onclick='() => _newOpen = true'>
+                    <span class="material-icons" style="font-size:.9rem">add</span> Ny lista
+                </button>
             }
         </div>
+    </div>
 
-        @{
-            var activeItems  = _list.Items.Where(i => !i.IsChecked)
-                                          .OrderBy(i => i.SortOrder).ToList();
-            var checkedItems = _list.Items.Where(i => i.IsChecked)
-                                          .OrderByDescending(i => i.CheckedAt).ToList();
-        }
+    <div class="page-content" style="overflow-y:auto;padding:0">
+        @ListsContent()
+    </div>
+</div>
 
-        <div style="border-radius:12px;border:.5px solid var(--color-border);
-                    overflow:hidden;margin-bottom:16px;background:var(--color-surface)">
-            @if (!activeItems.Any())
-            {
-                <div style="padding:16px;text-align:center;font-size:.85rem;
-                            color:var(--color-muted)">
-                    Alla uppgifter är klara! 🎉
-                </div>
-            }
-            @foreach (var item in activeItems)
-            {
-                <div style="display:flex;align-items:center;gap:12px;padding:13px 16px;
-                            border-bottom:.5px solid var(--color-border)">
-                    <div style="width:22px;height:22px;border-radius:50%;
-                                border:2px solid @_list.ColorHex;flex-shrink:0">
-                    </div>
-                    <span style="font-size:.9rem;color:var(--color-dark)">@item.Text</span>
-                </div>
-            }
-        </div>
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MOBILE
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="mobile-page-shell">
+    <div class="mobile-topbar">
+        <span class="mobile-title">Listor</span>
+    </div>
 
-        @if (checkedItems.Any())
-        {
-            <div style="font-size:.78rem;font-weight:600;color:var(--color-muted);
-                        text-transform:uppercase;letter-spacing:.05em;
-                        margin-bottom:8px;padding-left:4px">
-                @(_list.ListType == TaskListType.Shopping ? "Köpt" : "Klara")
-                (@checkedItems.Count)
-            </div>
-            <div style="border-radius:12px;border:.5px solid var(--color-border);
-                        overflow:hidden;background:var(--color-surface);opacity:.6">
-                @foreach (var item in checkedItems)
-                {
-                    <div style="display:flex;align-items:center;gap:12px;padding:11px 16px;
-                                border-bottom:.5px solid var(--color-border)">
-                        <div style="width:22px;height:22px;border-radius:50%;
-                                    background:@_list.ColorHex;flex-shrink:0;
-                                    display:flex;align-items:center;justify-content:center">
-                            <span class="material-icons"
-                                  style="font-size:.8rem;color:#fff">check</span>
-                        </div>
-                        <span style="font-size:.9rem;color:var(--color-muted);
-                                     text-decoration:line-through">@item.Text</span>
-                    </div>
-                }
-            </div>
-        }
+    <div class="mobile-page-scroll" style="padding:0">
+        @ListsContent()
+    </div>
 
-        <div style="text-align:center;margin-top:32px;font-size:.78rem;color:var(--color-muted)">
-            Delas via BudgetPlanner · Skrivskyddad vy
-            <br />
-            <button class="btn btn-ghost btn-sm" style="margin-top:8px" @onclick="LoadAsync">
-                <span class="material-icons" style="font-size:.9rem">refresh</span> Uppdatera
-            </button>
-        </div>
+    @if (BudgetState.CanEdit)
+    {
+        <button class="mobile-fab" @onclick='() => _newOpen = true'>
+            <span class="material-icons">add</span>
+        </button>
     }
 </div>
 
+<!-- ══════════════════════════════════════════════════════════════════════════
+     NEW LIST SHEET
+     ══════════════════════════════════════════════════════════════════════════ -->
+@if (_newOpen)
+{
+    <div class="sheet-overlay" @onclick='() => _newOpen = false'>
+        <div class="sheet-container" @onclick:stopPropagation
+             style="max-height:90%;overflow-y:auto">
+            <div class="sheet-handle-bar"></div>
+            <div style="padding:12px 16px;font-weight:600;font-size:.95rem">
+                Ny lista
+            </div>
+            <div style="padding:0 16px 24px">
+
+                <!-- Live preview card -->
+                <div class="list-card" style="--list-color:@_newColor;margin-bottom:16px">
+                    <span class="list-card-emoji">@_newEmoji</span>
+                    <div class="list-card-title">
+                        @(string.IsNullOrWhiteSpace(_newTitle) ? "Namnlös lista" : _newTitle)
+                    </div>
+                    <div class="list-card-meta">@TypeLabel(_newType) · 0 uppgifter</div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Namn</label>
+                    <input class="form-control" @bind="_newTitle"
+                           @bind:event="oninput" placeholder="Min lista..." />
+                </div>
+
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Typ</label>
+                    <div style="display:flex;gap:8px">
+                        @foreach (var lt in Enum.GetValues<TaskListType>())
+                        {
+                            var t = lt;
+                            <button class="btn btn-sm @(_newType == t ? "btn-primary" : "btn-secondary")"
+                                    @onclick="() => _newType = t">
+                                @TypeLabel(t)
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:14px">
+                    <label class="form-label">Emoji</label>
+                    <div class="new-list-emoji-row">
+                        @foreach (var em in Emojis)
+                        {
+                            var emoji = em;
+                            <button class="emoji-btn @(_newEmoji == emoji ? "selected" : "")"
+                                    @onclick="() => _newEmoji = emoji">@emoji</button>
+                        }
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:20px">
+                    <label class="form-label">Färg</label>
+                    <div class="new-list-color-row">
+                        @foreach (var c in Colors)
+                        {
+                            var col = c;
+                            <button class="color-swatch @(_newColor == col ? "selected" : "")"
+                                    style="background:@col"
+                                    @onclick="() => _newColor = col">
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:10px">
+                    <button class="btn btn-secondary" @onclick='() => _newOpen = false'>
+                        Avbryt
+                    </button>
+                    <button class="btn btn-primary" @onclick="CreateAsync"
+                            disabled="@(string.IsNullOrWhiteSpace(_newTitle) || _saving)">
+                        @if (_saving)
+                        {
+                            <span class="spinner" style="width:14px;height:14px;border-width:2px"></span>
+                        }
+                        Skapa lista
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
-    [Parameter] public string Token { get; set; } = "";
+    private List<TaskListDto> _lists   = new();
+    private bool              _loading = true;
+    private bool              _newOpen;
+    private bool              _saving;
 
-    private PublicTaskListDto? _list;
-    private bool _loading = true;
+    private string       _newTitle = "";
+    private TaskListType _newType  = TaskListType.ToDo;
+    private string       _newEmoji = "📋";
+    private string       _newColor = "#1565C0";
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private static readonly string[] Emojis =
+    {
+        "📋","✅","🛒","📝","🎯","💡","🏠","💼","🎉","📚","🏋️","🌱"
+    };
+    private static readonly string[] Colors =
+    {
+        "#1565C0","#2E7D32","#C62828","#F57F17","#6A1B9A",
+        "#00838F","#37474F","#AD1457","#4E342E","#1B5E20"
+    };
+
+    // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        BudgetState.StateChanged += OnStateChanged;
+        SignalR.OnBudgetEvent    += OnSignalR;
+        await LoadAsync();
+    }
+
+    public void Dispose()
+    {
+        BudgetState.StateChanged -= OnStateChanged;
+        SignalR.OnBudgetEvent    -= OnSignalR;
+    }
+
+    private void OnStateChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync(); StateHasChanged();
+    });
+
+    private async Task OnSignalR(State.BudgetHubEvent e)
+    {
+        if (e.BudgetId != BudgetState.ActiveBudgetId) return;
+        if (e.Event.StartsWith("TaskList"))
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
 
     private async Task LoadAsync()
     {
-        _loading = true; StateHasChanged();
+        if (BudgetState.ActiveBudgetId <= 0) { _loading = false; return; }
+        _loading = true;
+        var result = await ListSvc.GetAllAsync(BudgetState.ActiveBudgetId);
+        _lists   = result ?? new();
+        _loading = false;
+    }
+
+    // ── Create ─────────────────────────────────────────────────────────────────
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newTitle)) return;
+        _saving = true;
         try
         {
-            var http = HttpFactory.CreateClient("PublicClient");
-            var resp = await http.GetAsync($"api/lists/public/{Token}");
-            _list = resp.IsSuccessStatusCode
-                ? await resp.Content.ReadFromJsonAsync<PublicTaskListDto>()
-                : null;
+            var created = await ListSvc.CreateAsync(
+                BudgetState.ActiveBudgetId,
+                new CreateTaskListDto(_newTitle.Trim(), _newType, _newEmoji, _newColor));
+
+            if (created != null)
+            {
+                _newOpen  = false;
+                _newTitle = "";
+                _newType  = TaskListType.ToDo;
+                _newEmoji = "📋";
+                _newColor = "#1565C0";
+                Nav.NavigateTo($"/lists/{created.Id}");
+            }
+            else
+            {
+                Toast.Error("Kunde inte skapa listan.");
+            }
         }
-        catch { _list = null; }
-        finally { _loading = false; }
+        catch (Exception ex) { Toast.Error(ex.Message); }
+        finally { _saving = false; }
     }
+
+    // ── Shared content ─────────────────────────────────────────────────────────
+
+    private RenderFragment ListsContent() =>
+        @<div>
+            @if (_loading)
+            {
+                <div style="text-align:center;padding:60px">
+                    <div class="spinner"></div>
+                </div>
+            }
+            else if (!_lists.Any())
+            {
+                <div style="text-align:center;padding:60px 24px;color:var(--color-muted)">
+                    <span style="font-size:3rem;display:block;margin-bottom:12px">📋</span>
+                    <div style="font-size:.95rem;font-weight:500;margin-bottom:6px">
+                        Inga listor ännu
+                    </div>
+                    <div style="font-size:.85rem;margin-bottom:20px">
+                        Skapa din första lista för att komma igång.
+                    </div>
+                    @if (BudgetState.CanEdit)
+                    {
+                        <button class="btn btn-primary" @onclick='() => _newOpen = true'>
+                            <span class="material-icons" style="font-size:.9rem">add</span>
+                            Ny lista
+                        </button>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="lists-grid">
+                    @foreach (var list in _lists)
+                    {
+                        var l = list;
+                        <div class="list-card"
+                             style="--list-color:@l.ColorHex"
+                             @onclick='() => Nav.NavigateTo($"/lists/{l.Id}")'>
+
+                            @if (l.IsComplete && l.TotalItems > 0)
+                            {
+                                <span class="list-card-complete-badge">✓ Klar</span>
+                            }
+
+                            <span class="list-card-emoji">@l.Emoji</span>
+                            <div class="list-card-title">@l.Title</div>
+                            <div class="list-card-meta">
+                                @TypeLabel(l.ListType) · @l.ProgressLabel
+                            </div>
+
+                            @if (l.TotalItems > 0)
+                            {
+                                <div class="list-card-progress-bar">
+                                    <div class="list-card-progress-fill"
+                                         style="width:@l.ProgressPercent%"></div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>;
 
     private static string TypeLabel(TaskListType t) => t switch
     {

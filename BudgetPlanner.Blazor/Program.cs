@@ -28,6 +28,8 @@ builder.Services.AddHttpClient("PublicClient", client =>
         builder.Configuration["ApiBaseUrl"] ?? "https://localhost:7000/");
 });
 
+
+
 builder.Services.AddScoped(sp =>
     sp.GetRequiredService<IHttpClientFactory>().CreateClient("BudgetAPI"));
 
@@ -49,5 +51,7 @@ builder.Services.AddScoped<BudgetState>();
 builder.Services.AddScoped<JournalFilterState>();
 builder.Services.AddScoped<SignalRService>();
 builder.Services.AddScoped<TaskListApiService>();
+
+
 
 await builder.Build().RunAsync();

@@ -25,6 +25,9 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AuditLog>             AuditLogs             => Set<AuditLog>();
     public DbSet<AppSetting>           AppSettings           => Set<AppSetting>();
 
+    public DbSet<TaskList>            TaskLists             => Set<TaskList>();
+    public DbSet<TaskItem>            TaskItems             => Set<TaskItem>();
+
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
@@ -155,6 +158,32 @@ public class BudgetDbContext : IdentityDbContext<ApplicationUser>
             new ReceiptBatchCategory { Id = 6, Name = "Tjänster & Konsulting",  IconName = "handshake",      SortOrder = 6, Description = "Externa tjänster, prenumerationer" },
             new ReceiptBatchCategory { Id = 7, Name = "Övrigt",                 IconName = "more_horiz",     SortOrder = 7, Description = "Utlägg som inte passar annan kategori" }
         );
+
+        mb.Entity<TaskList>(e => {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Emoji).HasMaxLength(10);
+            e.Property(x => x.ColorHex).HasMaxLength(10);
+            e.Property(x => x.SharedToken).HasMaxLength(64).IsRequired();
+            // Unique index on SharedToken for O(1) public share lookup.
+            e.HasIndex(x => x.SharedToken).IsUnique();
+            e.HasOne(x => x.Budget)
+             .WithMany()
+             .HasForeignKey(x => x.BudgetId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Items)
+             .WithOne(i => i.List)
+             .HasForeignKey(i => i.ListId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        mb.Entity<TaskItem>(e => {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Text).HasMaxLength(500).IsRequired();
+            // Index for efficient per-list queries ordered by SortOrder.
+            e.HasIndex(x => new { x.ListId, x.SortOrder });
+        });
+
 
         // ── PHASE 1: Admin user is NO LONGER seeded here. ─────────────────────
         // Use DbInitializer.InitializeAsync() in Program.cs instead.
