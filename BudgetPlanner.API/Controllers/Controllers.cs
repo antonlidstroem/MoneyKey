@@ -51,6 +51,7 @@ public class AuthController : BaseApiController
     public AuthController(UserManager<ApplicationUser> users, TokenService tokens, BudgetDbContext db)
     { _users = users; _tokens = tokens; _db = db; }
 
+    [AllowAnonymous]
     [HttpPost("register")]
     [EnableRateLimiting("AuthPolicy")]
     public async Task<IActionResult> Register([FromBody] RegisterDto dto)
@@ -68,6 +69,7 @@ public class AuthController : BaseApiController
         return await IssueTokensAsync(user);
     }
 
+    [AllowAnonymous]
     [HttpPost("login")]
     [EnableRateLimiting("AuthPolicy")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
@@ -78,6 +80,7 @@ public class AuthController : BaseApiController
         return await IssueTokensAsync(user);
     }
 
+    [AllowAnonymous]
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh()
     {
